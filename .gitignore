@@ -1,0 +1,12 @@
+# 构建产物
+pmap.app/
+.build/
+
+# macOS
+.DS_Store
+
+# 本地配置（含主机别名等，不应入库）
+config.json
+
+# 工具生成的本地记忆/日志
+.workbuddy/
