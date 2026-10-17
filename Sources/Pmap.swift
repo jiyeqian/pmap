@@ -28,6 +28,8 @@ struct Group: Codable, Identifiable {
 struct Config: Codable {
     var host: String = ""
     var groups: [Group] = []
+    /// 从面板移除的主机（仅面板层隐藏，绝不修改 ~/.ssh/config）
+    var hiddenHosts: [String]? = nil
 }
 
 /// `ssh -G <host>` 展开出的连接参数
@@ -43,11 +45,11 @@ struct SSHTarget: Equatable {
     var aliasDefined: Bool { !hostname.isEmpty && hostname != alias }
 }
 
-enum ConnState: Equatable {
-    case disconnected
-    case connecting
-    case connected(since: Date)
-    case failed(String)
+enum HostConn: Equatable {
+    case off          // 灰：未连接
+    case connecting   // 灰：连接中
+    case on           // 绿：已连接
+    case failed       // 红：连接失败
 }
 
 // MARK: - SSH 配置解析
@@ -226,11 +228,9 @@ enum Tunnel {
         return code == 0
     }
 
-    /// 批量探测哪些别名已有 ControlMaster 连接（阻塞，需在后台线程调用）
-    static func online(_ aliases: [String]) -> Set<String> {
-        var alive: Set<String> = []
-        for a in aliases where check(host: a) { alive.insert(a) }
-        return alive
+    /// 断开 ControlMaster 主连接（单击已连接主机 = 断开）
+    static func shutdown(host: String) {
+        _ = Shell.ssh(controlArgs(host) + ["-O", "exit", host])
     }
 
     static func ensureConnection(host: String) -> String? {
@@ -256,29 +256,20 @@ enum Tunnel {
 @MainActor
 final class Store: ObservableObject {
     @Published var config = Config()
-    @Published var conn: ConnState = .disconnected
-    @Published var active: Set<Int> = []          // 已开启的本地端口
-    @Published var adhoc: [Rule] = []            // 临时端口
-    @Published var errors: [Int: String] = [:]   // 端口 -> 错误
+    @Published var hostState: [String: HostConn] = [:]  // 各主机连接状态
+    @Published var activeHost: String?                  // 当前已连接（绿）的主机
+    @Published var active: Set<Int> = []                // 已开启的本地端口
+    @Published var adhoc: [Rule] = []                   // 临时端口
+    @Published var errors: [Int: String] = [:]          // 端口 -> 错误
     @Published var busy = false
     @Published var quickInput = ""
-    @Published var focusQuickSignal = 0        // 递增触发万能输入框聚焦
-    @Published var lastHint: String?
-    @Published var onlineHosts: Set<String> = []   // 已探测到在线的别名（异步缓存）
+    @Published var inputInvalid = false                 // 万能输入格式错误（输入框红显）
 
     let hostAliases = SSHConfig.listHosts()
-    private var _target: SSHTarget?
-    private var _targetHost: String = ""
-    /// 解析当前主机连接参数（带缓存，仅主机变化时重新 `ssh -G`）
-    var target: SSHTarget? {
-        if _targetHost != config.host {
-            _targetHost = config.host
-            _target = config.host.isEmpty ? nil : SSHConfig.resolve(config.host)
-        }
-        return _target
-    }
 
-    var availableHosts: [String] { hostAliases }
+    /// 面板上显示的主机 = ssh config 全集 - 已移除（不动 ~/.ssh/config）
+    var hiddenHosts: Set<String> { Set(config.hiddenHosts ?? []) }
+    var visibleHosts: [String] { hostAliases.filter { !hiddenHosts.contains($0) } }
 
     private var configURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -294,8 +285,7 @@ final class Store: ObservableObject {
            let c = try? JSONDecoder().decode(Config.self, from: d) {
             config = c
         }
-        if config.host.isEmpty, let first = hostAliases.first { config.host = first }
-        refreshConnection()
+        for h in visibleHosts { hostState[h] = .off }
     }
 
     func save() {
@@ -305,67 +295,78 @@ final class Store: ObservableObject {
         if let d = try? JSONEncoder.pretty.encode(config) { try? d.write(to: url) }
     }
 
-    func reloadFromDisk() { load() }
+    func reloadFromDisk() {
+        let hidden = config.hiddenHosts
+        config = Config()
+        let url = configURL
+        if let d = try? Data(contentsOf: url),
+           let c = try? JSONDecoder().decode(Config.self, from: d) {
+            config = c
+        }
+        config.hiddenHosts = hidden
+        for h in visibleHosts { hostState[h] = .off }
+    }
 
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
-
-    func rules(in g: Group) -> [Rule] { g.rules }
 
     func isOn(_ r: Rule) -> Bool { active.contains(r.local) }
     func error(_ r: Rule) -> String? { errors[r.local] }
 
-    var totalCount: Int { allRules.count }
     var onCount: Int { allRules.filter { active.contains($0.local) }.count }
 
-    // 连接
-    func refreshConnection() {
-        guard !config.host.isEmpty else { conn = .disconnected; return }
-        let host = config.host
-        conn = .connecting
+    /// 当前可操作转发的主机（必须处于已连接状态）
+    private var connHost: String? {
+        guard let h = activeHost, hostState[h] == .on else { return nil }
+        return h
+    }
+
+    // MARK: 主机连接（单击切换 连接/断开）
+
+    /// 单击主机：已连接则断开（变灰）；否则连接（成功绿/失败红）。
+    /// 换主机时，旧主机自动断开变灰。
+    func toggleHost(_ alias: String) {
+        if activeHost == alias {
+            if hostState[alias] == .on { disconnectHost(alias) }
+            return   // connecting 中不重复触发
+        }
+        if let cur = activeHost { disconnectHost(cur) }
+        connectHost(alias)
+    }
+
+    private func connectHost(_ alias: String) {
+        hostState[alias] = .connecting
+        activeHost = alias
+        config.host = alias
+        save()
         Task {
-            let ok = await Task.detached { Tunnel.check(host: host) }.value
-            conn = ok ? .connected(since: Date()) : .disconnected
+            let e = await Task.detached { Tunnel.ensureConnection(host: alias) }.value
+            if e != nil {
+                hostState[alias] = .failed
+            } else {
+                hostState[alias] = .on
+            }
         }
     }
 
-    /// 切换主机：先关掉旧主机的全部转发，再刷新连接状态
-    func selectHost(_ alias: String) {
-        guard alias != config.host else { return }
-        // 同步清空旧主机的转发记录（旧连接的 socket 已随主机切换失效，无需逐条 cancel）
+    private func disconnectHost(_ alias: String) {
+        let ports = allRules.filter { active.contains($0.local) }
         active.removeAll()
         errors.removeAll()
-        config.host = alias
-        refreshConnection()
+        hostState[alias] = .off
+        if activeHost == alias { activeHost = nil }
+        Task.detached {
+            for r in ports { _ = Tunnel.cancel(host: alias, r) }
+            Tunnel.shutdown(host: alias)
+        }
+    }
+
+    /// 双击主机：从面板移除（仅隐藏，绝不修改 ~/.ssh/config）
+    func hideHost(_ alias: String) {
+        if activeHost == alias { disconnectHost(alias) }
+        var h = config.hiddenHosts ?? []
+        if !h.contains(alias) { h.append(alias) }
+        config.hiddenHosts = h
         save()
-    }
-
-    /// 后台探测各主机是否有现成 ControlMaster 连接。
-    /// 绝不能放在 view 的 body 里同步跑：每台一次 ssh -G + ssh -O check，
-    /// 八台就是十几个子进程，界面会整个卡住。
-    func probeOnlineHosts() {
-        let aliases = hostAliases
-        Task {
-            let alive = await Task.detached { Tunnel.online(aliases) }.value
-            onlineHosts = alive
-        }
-    }
-
-    var connLabel: String {
-        switch conn {
-        case .connected: return "已连接"
-        case .connecting: return "连接中"
-        case .disconnected: return "未连接"
-        case .failed(let m): return m
-        }
-    }
-
-    var dotColor: String {
-        switch conn {
-        case .connected: return "#1D9E75"
-        case .connecting: return "#EF9F27"
-        case .failed: return "#E24B4A"
-        case .disconnected: return "#888780"
-        }
     }
 
     // 单条切换
@@ -374,28 +375,18 @@ final class Store: ObservableObject {
     }
 
     func open(_ r: Rule) {
-        guard let host = config.host.isEmpty ? nil : config.host else { return }
+        guard let host = connHost else { return }
         busy = true
         Task {
             defer { busy = false }
-            // 阻塞的 ssh / lsof 全部在后台线程跑，避免卡死 UI
-            let result = await Task.detached { () -> (connErr: String?, busyBy: String?, fwdErr: String?) in
-                if let e = Tunnel.ensureConnection(host: host) {
-                    return (e, nil, nil)
-                }
+            // 阻塞的 lsof / ssh 全部在后台线程跑，避免卡死 UI
+            let result = await Task.detached { () -> (busyBy: String?, fwdErr: String?) in
                 if let busyBy = Shell.portBusy(r.local) {
-                    return (nil, busyBy, nil)
+                    return (busyBy, nil)
                 }
-                let fwdErr = Tunnel.forward(host: host, r)
-                return (nil, nil, fwdErr)
+                return (nil, Tunnel.forward(host: host, r))
             }.value
 
-            if let e = result.connErr {
-                errors[r.local] = e
-                conn = .failed(e)
-                return
-            }
-            conn = .connected(since: Date())
             if let busyBy = result.busyBy {
                 errors[r.local] = "本地 \(r.local) 被 \(busyBy) 占用"
                 return
@@ -410,8 +401,7 @@ final class Store: ObservableObject {
     }
 
     func close(_ r: Rule) {
-        guard !config.host.isEmpty else { return }
-        let host = config.host
+        guard let host = connHost else { return }
         busy = true
         Task {
             defer { busy = false }
@@ -424,50 +414,37 @@ final class Store: ObservableObject {
     /// 整组切换：全开则全关，否则整组开（fail-fast，失败回滚）
     func toggleGroup(_ g: Group) {
         let rs = g.rules
-        if rs.isEmpty { return }
+        guard connHost != nil, !rs.isEmpty else { return }
         if rs.allSatisfy({ active.contains($0.local) }) { rs.forEach { close($0) } }
-        else { openGroup(rs) }
+        else { openGroup(rs.filter { !active.contains($0.local) }) }
     }
 
     func openGroup(_ rs: [Rule]) {
-        guard !config.host.isEmpty else { return }
-        let host = config.host
+        guard let host = connHost, !rs.isEmpty else { return }
         busy = true
         Task {
             defer { busy = false }
-            let outcome = await Task.detached { () -> (opened: [Rule], failed: Rule?, err: String?, rollback: Int) in
-                if let e = Tunnel.ensureConnection(host: host) {
-                    return ([], nil, e, 0)
-                }
+            let outcome = await Task.detached { () -> (opened: [Rule], failed: Rule?, err: String?) in
                 var opened: [Rule] = []
                 for r in rs {
                     if let by = Shell.portBusy(r.local) {
                         opened.forEach { _ = Tunnel.cancel(host: host, $0) }
-                        return (opened, r, "本地 \(r.local) 被 \(by) 占用", opened.count)
+                        return (opened, r, "本地 \(r.local) 被 \(by) 占用")
                     }
                     if let e = Tunnel.forward(host: host, r) {
                         opened.forEach { _ = Tunnel.cancel(host: host, $0) }
-                        return (opened, r, e, opened.count)
+                        return (opened, r, e)
                     }
                     opened.append(r)
                 }
-                return (opened, nil, nil, 0)
+                return (opened, nil, nil)
             }.value
 
-            if let e = outcome.err {
-                // 连接失败（没有任何 opened，failed 为空）或某条失败（已回滚）
-                if outcome.failed == nil {
-                    conn = .failed(e)
-                    rs.forEach { errors[$0.local] = e }
-                } else if let r = outcome.failed {
-                    errors[r.local] = e
-                    outcome.opened.forEach { active.remove($0.local) }
-                    if outcome.rollback > 0 { lastHint = "已回滚本组 \(outcome.rollback) 条转发" }
-                }
+            if let r = outcome.failed, let e = outcome.err {
+                errors[r.local] = e
+                outcome.opened.forEach { active.remove($0.local) }
                 return
             }
-            // 全部成功
-            conn = .connected(since: Date())
             for r in outcome.opened {
                 errors[r.local] = nil
                 active.insert(r.local)
@@ -475,63 +452,58 @@ final class Store: ObservableObject {
         }
     }
 
-    func closeAll() {
-        for r in allRules where active.contains(r.local) { close(r) }
-    }
-
-    func openAll() {
-        openGroup(allRules)
-    }
-
-    // 万能入口解析：3000 | 8080:80 | 3000 web | 3000 @web
+    // 万能入口解析：port @组名 或 local_port:remote_port @组名
+    // 无组名 → 落入「临时」；组不存在则自动创建
     func parseQuick(_ s: String) -> (rule: Rule, group: String?)? {
         let t = s.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty else { return nil }
-        let parts = t.split(separator: " ").map(String.init)
-        let portToken = parts[0]
-        let groupName = parts.count > 1 ? parts[1].replacingOccurrences(of: "@", with: "") : nil
-
-        if portToken.contains(":") {
-            let p = portToken.split(separator: ":").map(String.init)
-            guard p.count == 2, let l = Int(p[0]), let r = Int(p[1]), isValid(l), isValid(r) else { return nil }
-            return (Rule(local: l, remote: r), groupName)
+        var portPart = t
+        var group: String? = nil
+        if let at = t.firstIndex(of: "@") {
+            portPart = String(t[..<at]).trimmingCharacters(in: .whitespaces)
+            let g = String(t[t.index(after: at)...]).trimmingCharacters(in: .whitespaces)
+            group = g.isEmpty ? nil : g
         }
-        guard let l = Int(portToken), isValid(l) else { return nil }
-        return (Rule(local: l, remote: l), groupName)
+        guard !portPart.isEmpty, !portPart.contains(" ") else { return nil }
+        if portPart.contains(":") {
+            let p = portPart.split(separator: ":").map(String.init)
+            guard p.count == 2, let l = Int(p[0]), let r = Int(p[1]), isValid(l), isValid(r) else { return nil }
+            return (Rule(local: l, remote: r), group)
+        }
+        guard let l = Int(portPart), isValid(l) else { return nil }
+        return (Rule(local: l, remote: l), group)
     }
 
     private func isValid(_ p: Int) -> Bool { p > 0 && p < 65536 }
 
+    static var usageHint: String { "格式：port @组名 或 local_port:remote_port @组名" }
+
     func commitQuick() {
-        guard let (rule, groupName) = parseQuick(quickInput) else {
-            lastHint = "无法识别：\(quickInput)  ·  格式：3000 / 8080:80 / 3000 web"
+        guard let (rule, group) = parseQuick(quickInput) else {
+            // 不弹出任何文字破坏面板：清空输入，输入框内红色高亮格式提示
             quickInput = ""
+            inputInvalid = true
             return
         }
-        if let g = groupName, let idx = config.groups.firstIndex(where: { $0.name == g }) {
-            if !config.groups[idx].rules.contains(rule) { config.groups[idx].rules.append(rule) }
-            open(rule)
-        } else if groupName != nil {
-            lastHint = "没有名为 \(groupName!) 的组"
-            quickInput = ""
-            return
+        if let g = group {
+            if let idx = config.groups.firstIndex(where: { $0.name == g }) {
+                if !config.groups[idx].rules.contains(rule) { config.groups[idx].rules.append(rule) }
+            } else {
+                config.groups.append(Group(name: g, rules: [rule]))
+            }
         } else {
             if !adhoc.contains(rule) { adhoc.append(rule) }
-            open(rule)
         }
         quickInput = ""
+        inputInvalid = false
         save()
-    }
-
-    func addRule(_ r: Rule, to g: Group) {
-        guard let idx = config.groups.firstIndex(where: { $0.name == g.name }) else { return }
-        if !config.groups[idx].rules.contains(r) { config.groups[idx].rules.append(r) }
-        save()
+        open(rule)
     }
 
     func removeRule(_ r: Rule, from g: Group) {
         guard let idx = config.groups.firstIndex(where: { $0.name == g.name }) else { return }
         config.groups[idx].rules.removeAll { $0 == r }
+        if config.groups[idx].rules.isEmpty { config.groups.remove(at: idx) }
         if active.contains(r.local) { close(r) }
         save()
     }
@@ -541,135 +513,158 @@ final class Store: ObservableObject {
         if active.contains(r.local) { close(r) }
     }
 
-    func addGroup() {
-        var n = "new"
-        var i = 1
-        while config.groups.contains(where: { $0.name == n }) { n = "new\(i)"; i += 1 }
-        config.groups.append(Group(name: n))
-        save()
+    /// 双击「临时」组：清空全部临时端口
+    func clearAdhoc() {
+        let rs = adhoc
+        adhoc.removeAll()
+        guard let host = connHost else { return }
+        for r in rs { active.remove(r.local); errors[r.local] = nil }
+        Task.detached {
+            for r in rs { _ = Tunnel.cancel(host: host, r) }
+        }
     }
 
+    /// 双击组名：删除该组
     func removeGroup(_ g: Group) {
-        g.rules.forEach { if active.contains($0.local) { close($0) } }
+        let rs = g.rules
         config.groups.removeAll { $0.name == g.name }
         save()
+        guard let host = connHost else { return }
+        for r in rs { active.remove(r.local); errors[r.local] = nil }
+        Task.detached {
+            for r in rs { _ = Tunnel.cancel(host: host, r) }
+        }
     }
-
-    func openConfigFile() {
-        let url = configURL
-        if !FileManager.default.fileExists(atPath: url.path) { save() }
-        NSWorkspace.shared.open(url)
-    }
-
-    var usageHint: String { "3000 · 8080:80 · 3000 web · 3000 @web" }
 }
 
 // MARK: - 视图
 
+/// 统一按钮状态色：绿=通，灰=不通，红=故障
+enum PillState {
+    case off, on, failed
+}
+
+/// 统一按钮风格：文字 + 圆角矩形框
+struct Pill: View {
+    let text: String
+    let state: PillState
+
+    private var fill: Color {
+        switch state {
+        case .off: return Color.secondary.opacity(0.08)
+        case .on: return Color.green.opacity(0.16)
+        case .failed: return Color.red.opacity(0.14)
+        }
+    }
+    private var border: Color {
+        switch state {
+        case .off: return Color.secondary.opacity(0.28)
+        case .on: return Color.green.opacity(0.55)
+        case .failed: return Color.red.opacity(0.6)
+        }
+    }
+    private var fg: Color {
+        switch state {
+        case .off: return Color.secondary
+        case .on: return Color.green
+        case .failed: return Color.red
+        }
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12, weight: state == .off ? .regular : .medium))
+            .foregroundStyle(fg)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(fill))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(border, lineWidth: 0.8))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// 端口 chip：单击开关，双击删除；绿=通，灰=不通，红=故障
 struct Chip: View {
     let rule: Rule
     let on: Bool
     let err: String?
     let action: () -> Void
-    let remove: (() -> Void)?
+    let remove: () -> Void
+
+    private var fgColor: Color {
+        if err != nil { return .red }
+        return on ? .primary : .secondary
+    }
+    private var fillColor: Color {
+        if err != nil { return Color.red.opacity(0.12) }
+        if on { return Color.green.opacity(0.14) }
+        return Color.secondary.opacity(0.06)
+    }
+    private var borderColor: Color {
+        if err != nil { return Color.red.opacity(0.6) }
+        if on { return Color.green.opacity(0.5) }
+        return Color.secondary.opacity(0.28)
+    }
+    private var hint: String {
+        if let e = err { return e }
+        return on ? "单击关闭 · 双击删除" : "单击开启 · 双击删除"
+    }
 
     var body: some View {
-        HStack(spacing: 3) {
-            Button(action: action) {
-                HStack(spacing: 4) {
-                    Circle().fill(on ? Color.green : Color.clear)
-                        .frame(width: 5, height: 5)
-                        .overlay(Circle().strokeBorder(on ? Color.clear : Color.secondary.opacity(0.5)))
-                    Text(rule.label).font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(on ? Color.primary : Color.secondary)
-                    if let err {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 8))
-                            .foregroundStyle(.orange)
-                            .help(err)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            if let remove {
-                Button(action: remove) {
-                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(on ? Color.green.opacity(0.12) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(err != nil ? Color.orange.opacity(0.5)
-                            : on ? Color.green.opacity(0.35) : Color.secondary.opacity(0.25),
-                            style: StrokeStyle(lineWidth: 0.5, dash: on && err == nil ? [] : [2, 2]))
-        )
+        Text(rule.label)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(fgColor)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 5).fill(fillColor))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(borderColor, lineWidth: 0.8))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
+            .onTapGesture(count: 2) { remove() }
+            .onTapGesture(count: 1) { action() }
+            .help(hint)
     }
 }
 
+/// 组行：组名按钮（单击全组开关，双击删组）+ 端口 chips
 struct GroupRow: View {
     @ObservedObject var store: Store
     let group: Group
-    let adhoc: Bool
+    let adhocGroup: Bool
 
     private var onCount: Int { group.rules.filter { store.active.contains($0.local) }.count }
     private var allOn: Bool { !group.rules.isEmpty && onCount == group.rules.count }
+    private var anyFailed: Bool { group.rules.contains { store.error($0) != nil } }
+
+    private var groupState: PillState {
+        if allOn { return .on }
+        if anyFailed { return .failed }
+        return .off
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 7) {
-                Button {
-                    adhoc ? store.rules(in: group).forEach { store.toggle($0) } : store.toggleGroup(group)
-                } label: {
-                    HStack(spacing: 7) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(allOn ? Color.green : Color.clear)
-                            .frame(width: 9, height: 9)
-                            .overlay(RoundedRectangle(cornerRadius: 2)
-                                .strokeBorder(allOn ? Color.clear : Color.secondary.opacity(0.5), lineWidth: 1))
-                        Text(group.name).font(.system(size: 13, weight: .medium))
-                        if !group.desc.isEmpty {
-                            Text(group.desc).font(.system(size: 11)).foregroundStyle(.tertiary)
-                        }
-                    }
+            Pill(text: group.name, state: groupState)
+                .onTapGesture(count: 2) {
+                    adhocGroup ? store.clearAdhoc() : store.removeGroup(group)
                 }
-                .buttonStyle(.plain)
-                Spacer()
-                Text("\(onCount)/\(group.rules.count)")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-            }
+                .onTapGesture(count: 1) { store.toggleGroup(group) }
+                .help(adhocGroup ? "单击全组开关 · 双击清空临时端口"
+                      : "单击全组开关 · 双击删除该组")
 
             if !group.rules.isEmpty {
                 FlowRow(spacing: 4) {
                     ForEach(group.rules) { r in
                         Chip(rule: r, on: store.isOn(r), err: store.error(r),
                              action: { store.toggle(r) },
-                             remove: adhoc ? { store.removeAdhoc(r) } : nil)
+                             remove: { adhocGroup ? store.removeAdhoc(r)
+                                      : store.removeRule(r, from: group) })
                     }
                 }
-                .padding(.leading, 16)
+                .padding(.leading, 4)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(onCount > 0 ? Color.secondary.opacity(0.08) : Color.clear)
-        )
-        .contextMenu {
-            if !adhoc {
-                Button("添加端口到本组…") { store.quickInput = ""; store.focusQuickSignal += 1 }
-                Divider()
-                Button("删除此组", role: .destructive) { store.removeGroup(group) }
-            }
-        }
     }
 }
 
@@ -709,66 +704,73 @@ struct MenuPanel: View {
     @FocusState var inputFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 连接状态
-            HStack(spacing: 7) {
-                Circle().fill(Color(hex: store.dotColor) ?? .secondary).frame(width: 7, height: 7)
-                Text(store.config.host.isEmpty ? "未选择主机" : store.config.host)
-                    .font(.system(size: 13, weight: .medium))
-                Text(store.connLabel).font(.system(size: 11)).foregroundStyle(.tertiary)
-                Spacer()
-                Text("\(store.onCount)/\(store.totalCount)").font(.system(size: 11)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            // 主机（单击连接/断开，双击移除）
+            VStack(alignment: .leading, spacing: 6) {
+                if store.visibleHosts.isEmpty {
+                    Text("~/.ssh/config 里没有可用主机")
+                        .font(.system(size: 11)).foregroundStyle(.orange)
+                        .padding(.vertical, 4)
+                } else {
+                    FlowRow(spacing: 5) {
+                        ForEach(store.visibleHosts, id: \.self) { alias in
+                            hostButton(alias)
+                        }
+                    }
+                }
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(Color.secondary.opacity(0.06))
-
-            VStack(spacing: 0) {
-                hostSection
-                Divider().padding(.vertical, 8)
-                groupSection
-            }
-            .padding(.horizontal, 6).padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let h = store.lastHint {
-                Text(h).font(.system(size: 11)).foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12).padding(.bottom, 4)
-            }
+            .padding(.horizontal, 10).padding(.vertical, 9)
 
             Divider()
 
-            // 万能入口
-            VStack(spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus").font(.system(size: 11)).foregroundStyle(.tertiary)
-                    TextField("", text: $store.quickInput, prompt: Text(store.usageHint)
-                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.tertiary))
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12, design: .monospaced))
-                        .focused($inputFocused)
-                        .onSubmit { store.commitQuick() }
-                        .onChange(of: store.focusQuickSignal) { _, _ in inputFocused = true }
-                    if !store.quickInput.isEmpty {
-                        Image(systemName: "return").font(.system(size: 10)).foregroundStyle(.tertiary)
-                    }
+            // 组（组名单击全组开关/双击删组；端口单击开关/双击删除）
+            VStack(alignment: .leading, spacing: 8) {
+                if store.config.groups.isEmpty && store.adhoc.isEmpty {
+                    Text("在下方输入 3000 @web 建组并加端口")
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .padding(.vertical, 4)
                 }
-                .padding(.horizontal, 9).padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.1)))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 0.5))
-
-                Text("格式：\(store.usageHint)")
-                    .font(.system(size: 10)).foregroundStyle(.quaternary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 3)
+                ForEach(store.config.groups) { g in
+                    GroupRow(store: store, group: g, adhocGroup: false)
+                }
+                if !store.adhoc.isEmpty {
+                    GroupRow(store: store,
+                             group: Group(name: "临时", rules: store.adhoc),
+                             adhocGroup: true)
+                }
             }
-            .padding(.horizontal, 10).padding(.top, 8)
+            .padding(.horizontal, 0).padding(.vertical, 9)
+
+            Divider()
+
+            // 万能输入框（唯一入口；格式错误在框内红色提示，不弹出文字）
+            HStack(spacing: 6) {
+                Image(systemName: "plus").font(.system(size: 11)).foregroundStyle(.tertiary)
+                TextField("", text: $store.quickInput,
+                          prompt: Text(Store.usageHint)
+                              .font(.system(size: 11, design: .monospaced))
+                              .foregroundColor(store.inputInvalid ? .red : .secondary))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(store.inputInvalid ? Color.red : Color.primary)
+                    .focused($inputFocused)
+                    .onSubmit { store.commitQuick() }
+                    .onChange(of: store.quickInput) { _, nv in
+                        if !nv.isEmpty { store.inputInvalid = false }
+                    }
+            }
+            .padding(.horizontal, 9).padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(store.inputInvalid ? Color.red.opacity(0.6) : Color.secondary.opacity(0.2),
+                              lineWidth: 0.8))
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .onAppear { inputFocused = true }
+
+            Divider()
 
             // 动作
             VStack(spacing: 1) {
-                row("全部开启", "⇧⌘↑") { store.openAll() }
-                row("全部关闭", "⇧⌘↓") { store.closeAll() }
-                Divider().padding(.vertical, 3)
                 row("重新载入配置", "") { store.reloadFromDisk() }
                 Divider().padding(.vertical, 3)
                 row("退出 pmap", "⌘Q") { NSApplication.shared.terminate(nil) }
@@ -776,124 +778,16 @@ struct MenuPanel: View {
             .padding(.horizontal, 6).padding(.vertical, 4)
         }
         .frame(width: 360)
-        .onAppear { store.probeOnlineHosts() }
     }
 
-    // 主机切换
-    private var hostSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if store.hostAliases.isEmpty {
-                Text("~/.ssh/config 里没有可用的 Host 条目")
-                    .font(.system(size: 11)).foregroundStyle(.orange)
-            } else {
-                FlowRow(spacing: 5) {
-                    ForEach(store.hostAliases, id: \.self) { alias in
-                        hostChip(alias, store: store)
-                    }
-                }
-            }
-
-            HStack(spacing: 8) {
-                Button("重连") { store.refreshConnection() }.buttonStyle(.plain)
-                    .font(.system(size: 11))
-                Text("·").foregroundStyle(.quaternary).font(.system(size: 11))
-                Button("打开 config.json") { store.openConfigFile() }.buttonStyle(.plain)
-                    .font(.system(size: 11))
-                Spacer()
-            }
-
-            if let t = store.target {
-                VStack(alignment: .leading, spacing: 3) {
-                    info("地址", "\(t.hostname):\(t.port)")
-                    info("用户", t.user)
-                    if !t.proxyJump.isEmpty { info("跳板", t.proxyJump) }
-                    if !t.identityFile.isEmpty { info("密钥", t.identityFile) }
-                    info("状态", store.connLabel)
-                    if !t.aliasDefined {
-                        Text("别名未在 ~/.ssh/config 中定义，可能连不上")
-                            .font(.system(size: 11)).foregroundStyle(.red)
-                    }
-                }
-                .padding(9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
-                Text("以上参数展开自 ~/.ssh/config，请到该文件修改")
-                    .font(.system(size: 10)).foregroundStyle(.quaternary)
-            } else if !store.config.host.isEmpty {
-                Text("无法解析别名 \(store.config.host)")
-                    .font(.system(size: 11)).foregroundStyle(.red)
-            }
-        }
-    }
-
-    // 组管理 + 组列表
-    private var groupSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("组").font(.system(size: 13, weight: .medium))
-                Spacer()
-                Button { store.addGroup() } label: {
-                    Image(systemName: "plus").font(.system(size: 11))
-                }.buttonStyle(.plain)
-            }
-
-            if store.config.groups.isEmpty && store.adhoc.isEmpty {
-                Text("还没有组，点「+」或在下面输入 `3000 web` 建组")
-                    .font(.system(size: 12)).foregroundStyle(.tertiary)
-                    .padding(.vertical, 8)
-            }
-
-            ForEach(store.config.groups) { g in
-                GroupRow(store: store, group: g, adhoc: false)
-            }
-            if !store.adhoc.isEmpty {
-                GroupRow(store: store,
-                         group: Group(name: "临时", desc: "本次会话", rules: store.adhoc),
-                         adhoc: true)
-            }
-        }
-    }
-
-    private func info(_ k: String, _ v: String) -> some View {
-        HStack(spacing: 8) {
-            Text(k).font(.system(size: 11)).foregroundStyle(.tertiary).frame(width: 40, alignment: .leading)
-            Text(v).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-        }
-    }
-
-    /// 主机选择按钮。整块都是点击区，点击热区足够大。
-    private func hostChip(_ alias: String, store: Store) -> some View {
-        let on = store.config.host == alias
-        let online = store.onlineHosts.contains(alias)
-        return Button {
-            store.selectHost(alias)
-        } label: {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(on ? Color.green : Color.secondary.opacity(0.35))
-                    .frame(width: 6, height: 6)
-                Text(alias)
-                    .font(.system(size: 12, weight: on ? .semibold : .regular))
-                    .foregroundStyle(on ? Color.primary : Color.secondary)
-                if online && !on {
-                    Text("在线").font(.system(size: 9)).foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(on ? Color.green.opacity(0.14) : Color.secondary.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(on ? Color.green.opacity(0.5) : Color.secondary.opacity(0.2),
-                                  lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .help(on ? "当前主机" : "切换到 \(alias)")
+    /// 主机按钮：单击连接/断开，双击从面板移除（不改 ~/.ssh/config）
+    private func hostButton(_ alias: String) -> some View {
+        let st = store.hostState[alias] ?? .off
+        let state: PillState = st == .on ? .on : (st == .failed ? .failed : .off)
+        return Pill(text: alias, state: state)
+            .onTapGesture(count: 2) { store.hideHost(alias) }
+            .onTapGesture(count: 1) { store.toggleHost(alias) }
+            .help("单击连接/断开 · 双击从面板移除")
     }
 
     private func row(_ t: String, _ k: String, _ a: @escaping () -> Void) -> some View {
@@ -907,50 +801,6 @@ struct MenuPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-struct GroupEdit: View {
-    @ObservedObject var store: Store
-    let group: Group
-
-    private var idx: Int? { store.config.groups.firstIndex(where: { $0.name == group.name }) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                if let i = idx {
-                    TextField("组名", text: Binding(
-                        get: { store.config.groups[i].name },
-                        set: { store.config.groups[i].name = $0; store.save() }
-                    ))
-                    .textFieldStyle(.plain).font(.system(size: 12, weight: .medium))
-
-                    TextField("说明", text: Binding(
-                        get: { store.config.groups[i].desc },
-                        set: { store.config.groups[i].desc = $0; store.save() }
-                    ))
-                    .textFieldStyle(.plain).font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    if let i = idx { store.config.groups.remove(at: i); store.save() }
-                } label: { Image(systemName: "trash").font(.system(size: 10)) }
-                    .buttonStyle(.plain).foregroundStyle(.red.opacity(0.7))
-            }
-            if !group.rules.isEmpty {
-                FlowRow(spacing: 4) {
-                    ForEach(group.rules) { r in
-                        Chip(rule: r, on: store.isOn(r), err: store.error(r),
-                             action: { store.toggle(r) },
-                             remove: { store.removeRule(r, from: group) })
-                    }
-                }
-            }
-        }
-        .padding(9)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
     }
 }
 
