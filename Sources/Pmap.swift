@@ -265,7 +265,7 @@ final class Store: ObservableObject {
     @Published var quickInput = ""
     @Published var inputInvalid = false                 // 万能输入格式错误（输入框红显）
 
-    let hostAliases = SSHConfig.listHosts()
+    @Published var hostAliases: [String] = []
 
     /// 面板上显示的主机 = ssh config 全集 - 已移除（不动 ~/.ssh/config）
     var hiddenHosts: Set<String> { Set(config.hiddenHosts ?? []) }
@@ -285,7 +285,7 @@ final class Store: ObservableObject {
            let c = try? JSONDecoder().decode(Config.self, from: d) {
             config = c
         }
-        for h in visibleHosts { hostState[h] = .off }
+        refreshHosts()
     }
 
     func save() {
@@ -295,8 +295,17 @@ final class Store: ObservableObject {
         if let d = try? JSONEncoder.pretty.encode(config) { try? d.write(to: url) }
     }
 
+    /// 重新扫描 ~/.ssh/config 的主机列表（恢复到面板显示），并刷新连接状态
+    private func refreshHosts() {
+        hostAliases = SSHConfig.listHosts()
+        for h in visibleHosts where hostState[h] == nil { hostState[h] = .off }
+    }
+
+    /// 重新载入配置：重读 ~/.ssh/config（恢复被移除的 Host）+ 重读本程序配置文件
     func reloadFromDisk() {
         let hidden = config.hiddenHosts
+        let curHost = config.host
+        let curActive = activeHost
         config = Config()
         let url = configURL
         if let d = try? Data(contentsOf: url),
@@ -304,7 +313,15 @@ final class Store: ObservableObject {
             config = c
         }
         config.hiddenHosts = hidden
-        for h in visibleHosts { hostState[h] = .off }
+        config.host = curHost
+        refreshHosts()
+        // 若当前活动主机已不在（被用户从 ssh config 删除），断开并复位
+        if let h = curActive, !visibleHosts.contains(h) {
+            active.removeAll()
+            errors.removeAll()
+            hostState[h] = .off
+            activeHost = nil
+        }
     }
 
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
@@ -476,7 +493,7 @@ final class Store: ObservableObject {
 
     private func isValid(_ p: Int) -> Bool { p > 0 && p < 65536 }
 
-    static var usageHint: String { "格式：port @组名 或 local_port:remote_port @组名" }
+    static var usageHint: String { "格式：port @组名 或 port:port @组名" }
 
     func commitQuick() {
         guard let (rule, group) = parseQuick(quickInput) else {
@@ -485,19 +502,46 @@ final class Store: ObservableObject {
             inputInvalid = true
             return
         }
-        if let g = group {
+
+        let targetName = group          // nil = 临时组
+        let samePort = { (r: Rule) in r.local == rule.local }   // 按端口（local）判同
+
+        // 1. 目标位置是否已有「完全一致」的规则（同端口同目标）→ 不变
+        if targetName == nil {
+            if adhoc.contains(where: samePort) {
+                quickInput = ""; inputInvalid = false; save()
+                return
+            }
+        } else if let idx = config.groups.firstIndex(where: { $0.name == targetName }) {
+            if config.groups[idx].rules.contains(where: samePort) {
+                quickInput = ""; inputInvalid = false; save()
+                return
+            }
+        }
+
+        // 2. 该端口是否已在别的组（含临时）→ 移出旧组（状态随端口迁移）
+        for i in config.groups.indices {
+            config.groups[i].rules.removeAll(where: samePort)
+        }
+        config.groups.removeAll { $0.rules.isEmpty }
+        adhoc.removeAll(where: samePort)
+
+        // 3. 落到目标组（不存在则新建）
+        if let g = targetName {
             if let idx = config.groups.firstIndex(where: { $0.name == g }) {
-                if !config.groups[idx].rules.contains(rule) { config.groups[idx].rules.append(rule) }
+                config.groups[idx].rules.append(rule)
             } else {
                 config.groups.append(Group(name: g, rules: [rule]))
             }
         } else {
-            if !adhoc.contains(rule) { adhoc.append(rule) }
+            adhoc.append(rule)
         }
+
         quickInput = ""
         inputInvalid = false
         save()
-        open(rule)
+        // 端口已开启则保持开启状态（active/errors 已随迁移保留），否则开启
+        if !active.contains(rule.local) { open(rule) }
     }
 
     func removeRule(_ r: Rule, from g: Group) {
@@ -773,7 +817,7 @@ struct MenuPanel: View {
             VStack(spacing: 1) {
                 row("重新载入配置", "") { store.reloadFromDisk() }
                 Divider().padding(.vertical, 3)
-                row("退出 pmap", "⌘Q") { NSApplication.shared.terminate(nil) }
+                row("退出", "⌘Q") { NSApplication.shared.terminate(nil) }
             }
             .padding(.horizontal, 6).padding(.vertical, 4)
         }
