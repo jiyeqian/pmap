@@ -301,9 +301,9 @@ final class Store: ObservableObject {
         for h in visibleHosts where hostState[h] == nil { hostState[h] = .off }
     }
 
-    /// 重新载入配置：重读 ~/.ssh/config（恢复被移除的 Host）+ 重读本程序配置文件
+    /// 重新载入配置：重读 ~/.ssh/config + 重读本程序配置文件，
+    /// 并清空「已移除」记录 —— 恢复所有被双击移除的 Host
     func reloadFromDisk() {
-        let hidden = config.hiddenHosts
         let curHost = config.host
         let curActive = activeHost
         config = Config()
@@ -312,9 +312,10 @@ final class Store: ObservableObject {
            let c = try? JSONDecoder().decode(Config.self, from: d) {
             config = c
         }
-        config.hiddenHosts = hidden
+        config.hiddenHosts = nil          // 恢复全部被移除的 Host
         config.host = curHost
         refreshHosts()
+        for h in visibleHosts where hostState[h] == nil { hostState[h] = .off }
         // 若当前活动主机已不在（被用户从 ssh config 删除），断开并复位
         if let h = curActive, !visibleHosts.contains(h) {
             active.removeAll()
@@ -322,6 +323,7 @@ final class Store: ObservableObject {
             hostState[h] = .off
             activeHost = nil
         }
+        save()
     }
 
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
