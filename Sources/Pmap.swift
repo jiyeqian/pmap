@@ -764,7 +764,7 @@ struct MenuPanel: View {
             .buttonStyle(.plain)
             .rowHover()
         }
-        .frame(width: 160)
+        .frame(width: 180)
     }
 
     private var appVersion: String {
@@ -874,7 +874,7 @@ struct PromptProbe: View {
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .frame(width: 160)
+        .frame(width: 180)
     }
 }
 
@@ -923,7 +923,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
         // 无箭头自绘面板（NSPopover 的箭头去不掉，改用无边框 NSPanel）
-        let p = PanelWindow(contentRect: NSRect(x: 0, y: 0, width: 160, height: 200),
+        let p = PanelWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 200),
                             styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
         p.isOpaque = false
@@ -932,7 +932,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.level = .statusBar
         p.isMovableByWindowBackground = false
         p.isReleasedWhenClosed = false
-        let content = NSHostingView(rootView: MenuPanel(store: store).frame(width: 160))
+        let content = NSHostingView(rootView: MenuPanel(store: store).frame(width: 180))
         content.wantsLayer = true
         content.layer?.cornerRadius = 12
         content.layer?.masksToBounds = true
@@ -968,9 +968,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         // 尺寸随内容自适应
-        let fit = panel.contentView?.fittingSize ?? NSSize(width: 160, height: 200)
+        let fit = panel.contentView?.fittingSize ?? NSSize(width: 180, height: 200)
         var frame = panel.frame
-        frame.size = NSSize(width: 160, height: max(fit.height, 100))
+        frame.size = NSSize(width: 180, height: max(fit.height, 100))
         // 左边缘对齐状态栏图标左边缘；面板顶部贴住菜单栏下方
         frame.origin.x = iconWin.frame.minX
         let screen = iconWin.screen ?? NSScreen.main!
