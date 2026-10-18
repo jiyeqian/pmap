@@ -110,6 +110,28 @@ pmap **读取**你本机的 `~/.ssh/config` 来获取主机列表（Host 别名�
 - 需要新增 / 修改主机时，请直接编辑 `~/.ssh/config`，然后重启 pmap 即可看到变化。
 - 主机认证（密钥、密码）沿用你 SSH 的既有配置。
 
+#### 哪些主机会显示
+
+pmap 只显示 `~/.ssh/config` 中满足以下条件的 Host 别名：
+
+| 规则 | 是否显示 | 示例 |
+|------|---------|------|
+| 不含点号、不含通配符的别名 | ✅ 显示 | `mbp16`、`pi4`、`myserver` |
+| 含点号（域名/地址） | ❌ 不显示 | `bitbucket.org`、`github.com` |
+| 含通配符（`*` `?` `!`） | ❌ 不显示 | `Host *.example.com` |
+| 指向本机（`localhost` / `127.0.0.1` / `::1`） | ❌ 不显示 | `Host localhost` |
+
+> 设计意图：含点的 Host 通常是 Git 托管等域名的访问入口，而非需要开端口隧道的远程主机。
+> 若某个含点主机确实需要通过 pmap 管理，给它加一个无点别名即可，例如：
+>
+> ```
+> Host bitbucket
+>     HostName altssh.bitbucket.org
+>     User git
+>     Port 443
+>     IdentityFile ~/.ssh/id_ed25519
+> ```
+
 ### 连接复用（ControlPath）
 
 pmap 使用独立的 ControlPath 目录，不依赖 `~/.ssh/config` 中是否启用了 ControlMaster：
