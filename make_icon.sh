@@ -19,27 +19,32 @@ image.lockFocus()
 
 let ctx = NSGraphicsContext.current!.cgContext
 
-// 背景： macOS 图标是带圆角的方形，这里画满格（系统会自动裁圆角）
+// 背景：macOS 图标是带圆角的方形，这里画满格（系统会自动裁圆角）
+// 深灰黑单色背景（Apple HIG 深色图标常用 #2C2C2E，克制、无渐变）
 let bgRect = CGRect(x: 0, y: 0, width: size, height: size)
-let bgColor = NSColor(calibratedRed: 0.13, green: 0.15, blue: 0.18, alpha: 1)
+let bgColor = NSColor(calibratedRed: 0.17, green: 0.17, blue: 0.18, alpha: 1)
 bgColor.setFill()
 ctx.fill(bgRect)
 
-// 直接使用 SF Symbol 的原生图形（与状态栏同一符号、同一视觉语言）
+// 主体：白色双向箭头（与状态栏同一 SF Symbol，medium 字重，居中）
+// SF Symbol 默认是黑色模板图，需用 sourceAtop 蒙版技法染成白色
 if let symbol = NSImage(systemSymbolName: "arrow.left.arrow.right", accessibilityDescription: nil) {
-    let config = NSImage.SymbolConfiguration(pointSize: size * 0.56, weight: .medium)
+    let config = NSImage.SymbolConfiguration(pointSize: size * 0.48, weight: .medium)
     if let configured = symbol.withSymbolConfiguration(config) {
-        // 白色模板图
+        // 先画符号作为蒙版（黑箭头 + 透明底）
         let tinted = NSImage(size: configured.size)
         tinted.lockFocus()
-        NSColor.white.set()
+        let tctx = NSGraphicsContext.current!.cgContext
         configured.draw(in: NSRect(origin: .zero, size: configured.size))
+        tctx.setBlendMode(.sourceAtop)
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: configured.size).fill()
         tinted.unlockFocus()
 
-        let target = NSSize(width: size * 0.72, height: size * 0.72)
-        let origin = NSPoint(x: (size - target.width) / 2, y: (size - target.height) / 2)
-        tinted.draw(in: NSRect(origin: origin, size: target),
-                    from: NSRect(origin: .zero, size: tinted.size),
+        let origin = NSPoint(x: (size - configured.size.width) / 2,
+                             y: (size - configured.size.height) / 2)
+        tinted.draw(in: NSRect(origin: origin, size: configured.size),
+                    from: NSRect(origin: .zero, size: configured.size),
                     operation: .sourceOver, fraction: 1.0)
     }
 }

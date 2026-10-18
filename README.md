@@ -41,6 +41,9 @@ open pmap.app
 
 构建产物 `pmap.app` 是 Intel + Apple Silicon 通用二进制。
 
+- 应用图标（`AppIcon.icns`）由 `make_icon.sh` 生成：深灰黑背景 + 白色双向箭头（SF Symbol `arrow.left.arrow.right`），与菜单栏图标同源。`build.sh` 会在图标不存在时自动调用它；如需单独重新生成，运行 `./make_icon.sh` 即可。
+- 单元测试用 `./test.sh` 运行（Swift Testing 框架，覆盖端口解析 / SSH 配置解析等纯函数）。
+
 > 构建依赖 Xcode 工具链（macOS 自带 CommandLineTools 6.4 缺少 SwiftUI 宏插件，`build.sh` 会自动检测并加载 Xcode 里的 `libSwiftUIMacros.dylib`）。
 >
 > GitHub Actions 的 release 构建使用 `macos-26` runner（带 macOS 26/27 SDK 的新版 SwiftUI），与本机 macOS 26+ SDK 构建的 UI 渲染效果一致。
