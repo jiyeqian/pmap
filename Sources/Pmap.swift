@@ -482,7 +482,7 @@ final class Store: ObservableObject {
         let samePort = { (r: Rule) in r.local == rule.local }
         if adhoc.contains(where: samePort) || config.groups.flatMap(\.rules).contains(where: samePort) {
             quickInput = ""
-            inputInvalid = "本地端口 \(rule.local) 已存在"
+            inputInvalid = "本地端口已映射"
             return
         }
         adhoc.append(rule)
