@@ -270,6 +270,7 @@ final class Store: ObservableObject {
     @Published var inputInvalid: String? = nil          // 万能输入错误提示（非空则输入框红显）
 
     @Published var hostAliases: [String] = []
+    private var heartbeatTask: Task<Void, Never>?       // 断线检测心跳
 
     /// 面板上显示的主机 = ssh config 全集 - 已移除（不动 ~/.ssh/config）
     var hiddenHosts: Set<String> { Set(config.hiddenHosts ?? []) }
@@ -318,6 +319,7 @@ final class Store: ObservableObject {
 
     /// 退出前：断开全部端口映射 + 断开主机
     func shutdownAll() {
+        stopHeartbeat()
         let ports = allRules.filter { active.contains($0.local) }
         let host = connHost ?? config.host
         active.removeAll()
@@ -348,6 +350,7 @@ final class Store: ObservableObject {
     // MARK: 主机连接（下拉选中即连接）
 
     private func connectHost(_ alias: String, restorePorts: Bool = false) {
+        stopHeartbeat()
         hostState[alias] = .connecting
         activeHost = alias
         config.host = alias
@@ -366,10 +369,12 @@ final class Store: ObservableObject {
                 let fwdErr = await Task.detached { Tunnel.forward(host: alias, r) }.value
                 if fwdErr != nil { errors[r.local] = fwdErr } else { errors[r.local] = nil }
             }
+            self.startHeartbeat(host: alias)
         }
     }
 
     private func disconnectHost(_ alias: String) {
+        stopHeartbeat()
         let ports = allRules.filter { active.contains($0.local) }
         active.removeAll()
         errors.removeAll()
@@ -379,6 +384,42 @@ final class Store: ObservableObject {
             for r in ports { _ = Tunnel.cancel(host: alias, r) }
             Tunnel.shutdown(host: alias)
         }
+    }
+
+    // MARK: 断线自动恢复
+
+    /// 启动心跳：每 30 秒检测一次连接是否存活，断开则自动重连并恢复端口
+    private func startHeartbeat(host: String) {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if Task.isCancelled { break }
+                guard let self else { break }
+                // 后台检测连接是否存活
+                let alive = await Task.detached { Tunnel.check(host: host) }.value
+                if !alive {
+                    // 断线：保留 active（记住哪些端口该开），自动重连并恢复
+                    self.hostState[host] = .connecting
+                    let toRestore = self.allRules.filter { self.active.contains($0.local) }
+                    let err = await Task.detached { Tunnel.ensureConnection(host: host) }.value
+                    if err != nil {
+                        self.hostState[host] = .failed
+                        continue
+                    }
+                    self.hostState[host] = .on
+                    for r in toRestore {
+                        let fwdErr = await Task.detached { Tunnel.forward(host: host, r) }.value
+                        if fwdErr != nil { self.errors[r.local] = fwdErr } else { self.errors[r.local] = nil }
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
     }
 
     /// 下拉选中主机：选中即连接（已连接则保持）
