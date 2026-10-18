@@ -483,6 +483,21 @@ final class Store: ObservableObject {
 
 // MARK: - 视图
 
+/// 行悬停高亮（参考系统菜单：鼠标移到该项右高亮）
+struct RowHover: ViewModifier {
+    @State private var hovering = false
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(hovering ? Color.primary.opacity(0.09) : Color.clear))
+            .onHover { hovering = $0 }
+    }
+}
+
+extension View {
+    func rowHover() -> some View { modifier(RowHover()) }
+}
+
 /// 端口行：小圆点（三色状态）+ 端口文字（单色）+ 右侧删除图标
 struct Chip: View {
     let rule: Rule
@@ -490,6 +505,7 @@ struct Chip: View {
     let err: String?
     let action: () -> Void
     let remove: () -> Void
+    @State private var hovering = false
 
     private var dotColor: Color {
         if err != nil { return .red }
@@ -507,7 +523,7 @@ struct Chip: View {
                 .frame(width: 6, height: 6)
             Text(rule.label)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Color.primary)
+                .foregroundStyle(hovering ? Color.green : Color.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .onTapGesture(count: 1) { action() }
@@ -516,13 +532,16 @@ struct Chip: View {
             Button(action: remove) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(hovering ? .secondary : .tertiary)
             }
             .buttonStyle(.plain)
             .help("删除端口")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 5)
+            .fill(hovering ? Color.primary.opacity(0.09) : Color.clear))
+        .onHover { hovering = $0 }
         .contentShape(Rectangle())
         .help(hint)
     }
@@ -581,6 +600,25 @@ struct MenuPanel: View {
 
             Divider()
 
+            // 倒数第二项：pmap 版本（点击打开 GitHub）
+            Button {
+                if let url = URL(string: "https://github.com/jiyeqian/pmap") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                HStack {
+                    Text("pmap \(appVersion)")
+                        .font(.system(size: 11))
+                    Spacer()
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .rowHover()
+
+            Divider()
+
             // 最后一项：退出；底部留白更大
             Button {
                 NSApplication.shared.terminate(nil)
@@ -598,8 +636,13 @@ struct MenuPanel: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .rowHover()
         }
         .frame(width: 154)
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
     }
 
     /// 主机下拉框：标题显示当前状态文字（断开/连接中…/连通/故障），选中即连接
@@ -693,10 +736,17 @@ extension Store {
     static var shared: Store?
 }
 
+/// 无边框面板（可成为 key window，支持输入框聚焦）
+final class PanelWindow: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private let popover = NSPopover()
+    private var panel: PanelWindow?
     private var countObserver: AnyCancellable?
+    private var eventMonitors: [Any] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let store = Store.shared else { return }
@@ -709,7 +759,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               accessibilityDescription: "pmap")
             img?.isTemplate = true
             btn.image = img
-            btn.action = #selector(togglePopover(_:))
+            btn.action = #selector(togglePanel(_:))
             btn.target = self
         }
         // onCount 是计算属性（依赖 active/config/adhoc），合并监听这些来源的变化
@@ -723,38 +773,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.statusItem?.button?.title = store.onCount > 0 ? " \(store.onCount)" : ""
             }
 
-        // 弹出面板
-        popover.behavior = .transient          // 点击面板外自动关闭，行为同菜单
-        let vc = NSHostingController(rootView: MenuPanel(store: store).frame(width: 154))
-        vc.sizingOptions = .preferredContentSize   // 自适应内容高度，避免截断
-        popover.contentSize = NSSize(width: 154, height: 640)
-        popover.contentViewController = vc
+        // 无箭头自绘面板（NSPopover 的箭头去不掉，改用无边框 NSPanel）
+        let p = PanelWindow(contentRect: NSRect(x: 0, y: 0, width: 154, height: 200),
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        p.level = .statusBar
+        p.isMovableByWindowBackground = false
+        p.isReleasedWhenClosed = false
+        let content = NSHostingView(rootView: MenuPanel(store: store).frame(width: 154))
+        content.wantsLayer = true
+        content.layer?.cornerRadius = 12
+        content.layer?.masksToBounds = true
+        content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        p.contentView = content
+        panel = p
+
+        // 点击面板外自动关闭（模拟菜单行为）
+        eventMonitors = [
+            NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                self?.closePanel()
+            },
+            NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
+                guard let self, let panel = self.panel, panel.isVisible else { return e }
+                let loc = NSEvent.mouseLocation
+                // 点在状态栏图标上：只关面板（吞掉事件，避免关闭后又立即打开）
+                if let iconWin = self.statusItem?.button?.window, iconWin.frame.contains(loc) {
+                    self.closePanel()
+                    return nil
+                }
+                if !panel.frame.contains(loc) { self.closePanel() }
+                return e
+            },
+        ]
 
         // 启动时：若有选中主机，自动连接
         store.autoConnectIfNeeded()
     }
 
-    @objc private func togglePopover(_ sender: Any?) {
-        guard let btn = statusItem?.button else { return }
-        if popover.isShown {
-            popover.performClose(nil)
-        } else {
-            // 锚点取图标左缘的窄条
-            let anchor = NSRect(x: 0, y: 0, width: 6, height: btn.bounds.height)
-            popover.show(relativeTo: anchor, of: btn, preferredEdge: .minY)
-            // 修正：让面板左边缘对齐图标左边缘（而非面板中心对齐）
-            if let win = popover.contentViewController?.view.window,
-               let screen = btn.window?.screen ?? NSScreen.main {
-                let iconLeft = btn.window!.convertPoint(toScreen: btn.convert(NSPoint(x: 0, y: 0), to: nil)).x
-                var frame = win.frame
-                frame.origin.x = iconLeft
-                // 防止越出屏幕右缘
-                let maxX = screen.visibleFrame.maxX
-                if frame.maxX > maxX { frame.origin.x = maxX - frame.width }
-                win.setFrameOrigin(frame.origin)
-            }
-            popover.contentViewController?.view.window?.makeKey()
+    @objc private func togglePanel(_ sender: Any?) {
+        guard let panel, let btn = statusItem?.button, let iconWin = btn.window else { return }
+        if panel.isVisible {
+            closePanel()
+            return
         }
+        // 尺寸随内容自适应
+        let fit = panel.contentView?.fittingSize ?? NSSize(width: 154, height: 200)
+        var frame = panel.frame
+        frame.size = NSSize(width: 154, height: max(fit.height, 100))
+        // 左边缘对齐状态栏图标左边缘；面板顶部贴住菜单栏下方
+        frame.origin.x = iconWin.frame.minX
+        let screen = iconWin.screen ?? NSScreen.main!
+        frame.origin.y = screen.visibleFrame.maxY - frame.height - 5
+        // 防止越出屏幕右缘
+        if frame.maxX > screen.visibleFrame.maxX {
+            frame.origin.x = screen.visibleFrame.maxX - frame.width
+        }
+        panel.setFrame(frame, display: true)
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func closePanel() {
+        panel?.orderOut(nil)
+        Store.shared?.save()
     }
 
     /// 退出前保存当前设置状态

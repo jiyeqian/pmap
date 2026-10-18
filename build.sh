@@ -12,10 +12,17 @@ rm -rf "$BUILD_DIR" "${APP}.app"
 mkdir -p "$BUILD_DIR"
 
 echo "▸ 编译通用二进制 (x86_64 + arm64)..."
+# CommandLineTools 6.4 缺少 SwiftUI 宏插件（SwiftUIMacros），改用 Xcode 工具链并显式加载
+XCODE_PLUGIN="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib"
+MACRO_ARGS=()
+if [ -f "$XCODE_PLUGIN" ]; then
+  MACRO_ARGS=(-load-plugin-library "$XCODE_PLUGIN")
+fi
 for ARCH in x86_64 arm64; do
-  swiftc -O -parse-as-library \
+  xcrun swiftc -O -parse-as-library \
     -target ${ARCH}-apple-macos14.0 \
     -framework SwiftUI -framework AppKit -framework Combine \
+    "${MACRO_ARGS[@]}" \
     -o "${BUILD_DIR}/${APP_NAME}-${ARCH}" \
     Sources/Pmap.swift
   echo "  ✓ ${ARCH}"
