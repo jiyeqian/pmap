@@ -41,6 +41,24 @@ open pmap.app
 
 > 构建依赖 Xcode 工具链（macOS 自带 CommandLineTools 6.4 缺少 SwiftUI 宏插件，`build.sh` 会自动检测并加载 Xcode 里的 `libSwiftUIMacros.dylib`）。
 
+### 首次打开的安全提示
+
+pmap 未做 Apple 公证（无付费开发者证书），首次打开时 macOS 会提示 **"pmap" Not Opened**（Apple could not verify...）。这是 Gatekeeper 对所有未经公证应用的统一拦截，不代表软件有问题。两种放行方式任选其一：
+
+**方式 A：系统设置放行（推荐）**
+
+1. 点弹窗的 **Done** 关闭提示
+2. 打开 **系统设置 → 隐私与安全性**，拉到底部
+3. 找到 "pmap" was blocked... 一行，点 **Open Anyway** → 再点 **Open**
+
+**方式 B：终端一条命令**
+
+```bash
+xattr -cr /Applications/pmap.app
+```
+
+放行一次后，之后打开不再有任何提示。
+
 ## 使用
 
 1. 点击菜单栏的「双向箭头」图标，弹出面板。
