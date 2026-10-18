@@ -824,22 +824,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = p
 
         // 点击面板外自动关闭（模拟菜单行为）
-        eventMonitors = [
-            NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-                self?.closePanel()
-            },
-            NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
-                guard let self, let panel = self.panel, panel.isVisible else { return e }
-                let loc = NSEvent.mouseLocation
-                // 点在状态栏图标上：只关面板（吞掉事件，避免关闭后又立即打开）
-                if let iconWin = self.statusItem?.button?.window, iconWin.frame.contains(loc) {
-                    self.closePanel()
-                    return nil
-                }
-                if !panel.frame.contains(loc) { self.closePanel() }
-                return e
-            },
-        ]
+        let globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.closePanel()
+        }
+        let localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
+            guard let self, let panel = self.panel, panel.isVisible else { return e }
+            let loc = NSEvent.mouseLocation
+            // 点在状态栏图标上：只关面板（吞掉事件，避免关闭后又立即打开）
+            if let iconWin = self.statusItem?.button?.window, iconWin.frame.contains(loc) {
+                self.closePanel()
+                return nil
+            }
+            if !panel.frame.contains(loc) { self.closePanel() }
+            return e
+        }
+        eventMonitors = [globalMonitor, localMonitor].compactMap { $0 }
 
         // 启动时：若有选中主机，自动连接
         store.autoConnectIfNeeded()
