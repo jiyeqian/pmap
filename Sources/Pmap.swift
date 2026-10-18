@@ -28,6 +28,8 @@ struct Group: Codable, Identifiable {
 struct Config: Codable {
     var host: String = ""
     var groups: [Group] = []
+    /// 端口列表（扁平，不再分组）——持久化端口
+    var adhoc: [Rule]? = nil
     /// 从面板移除的主机（仅面板层隐藏，绝不修改 ~/.ssh/config）
     var hiddenHosts: [String]? = nil
 }
@@ -285,10 +287,12 @@ final class Store: ObservableObject {
            let c = try? JSONDecoder().decode(Config.self, from: d) {
             config = c
         }
+        adhoc = config.adhoc ?? []
         refreshHosts()
     }
 
     func save() {
+        config.adhoc = adhoc          // 端口持久化
         let url = configURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
@@ -595,7 +599,7 @@ struct MenuPanel: View {
             }
             .buttonStyle(.plain)
         }
-        .frame(width: 220)
+        .frame(width: 154)
     }
 
     /// 主机下拉框：标题显示当前状态文字（断开/连接中…/连通/故障），选中即连接
@@ -721,9 +725,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 弹出面板
         popover.behavior = .transient          // 点击面板外自动关闭，行为同菜单
-        let vc = NSHostingController(rootView: MenuPanel(store: store).frame(width: 220))
+        let vc = NSHostingController(rootView: MenuPanel(store: store).frame(width: 154))
         vc.sizingOptions = .preferredContentSize   // 自适应内容高度，避免截断
-        popover.contentSize = NSSize(width: 220, height: 640)
+        popover.contentSize = NSSize(width: 154, height: 640)
         popover.contentViewController = vc
 
         // 启动时：若有选中主机，自动连接
@@ -735,9 +739,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            // 锚点取图标左缘的窄条，使面板左对齐图标（而非中部对齐）
+            // 锚点取图标左缘的窄条
             let anchor = NSRect(x: 0, y: 0, width: 6, height: btn.bounds.height)
             popover.show(relativeTo: anchor, of: btn, preferredEdge: .minY)
+            // 修正：让面板左边缘对齐图标左边缘（而非面板中心对齐）
+            if let win = popover.contentViewController?.view.window,
+               let screen = btn.window?.screen ?? NSScreen.main {
+                let iconLeft = btn.window!.convertPoint(toScreen: btn.convert(NSPoint(x: 0, y: 0), to: nil)).x
+                var frame = win.frame
+                frame.origin.x = iconLeft
+                // 防止越出屏幕右缘
+                let maxX = screen.visibleFrame.maxX
+                if frame.maxX > maxX { frame.origin.x = maxX - frame.width }
+                win.setFrameOrigin(frame.origin)
+            }
             popover.contentViewController?.view.window?.makeKey()
         }
     }
