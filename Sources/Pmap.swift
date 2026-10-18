@@ -30,6 +30,8 @@ struct Config: Codable {
     var groups: [Group] = []
     /// 端口列表（扁平，不再分组）——持久化端口
     var adhoc: [Rule]? = nil
+    /// 已开启的本地端口（退出前保存，重启后恢复转发状态）
+    var active: [Int]? = nil
     /// 从面板移除的主机（仅面板层隐藏，绝不修改 ~/.ssh/config）
     var hiddenHosts: [String]? = nil
 }
@@ -288,11 +290,13 @@ final class Store: ObservableObject {
             config = c
         }
         adhoc = config.adhoc ?? []
+        active = Set(config.active ?? [])     // 恢复端口开启状态
         refreshHosts()
     }
 
     func save() {
-        config.adhoc = adhoc          // 端口持久化
+        config.adhoc = adhoc                  // 端口持久化
+        config.active = Array(active).sorted() // 端口状态持久化
         let url = configURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
@@ -305,11 +309,27 @@ final class Store: ObservableObject {
         for h in visibleHosts where hostState[h] == nil { hostState[h] = .off }
     }
 
-    /// 启动时：若有选中主机（config.host 非空且可见），自动连接
+    /// 启动时：若有选中主机（config.host 非空且可见），自动连接并恢复端口转发
     func autoConnectIfNeeded() {
         let h = config.host
         guard !h.isEmpty, visibleHosts.contains(h), hostState[h] == .off else { return }
-        connectHost(h)
+        connectHost(h, restorePorts: true)
+    }
+
+    /// 退出前：断开全部端口映射 + 断开主机
+    func shutdownAll() {
+        let ports = allRules.filter { active.contains($0.local) }
+        let host = connHost ?? config.host
+        active.removeAll()
+        errors.removeAll()
+        for h in hostState.keys { hostState[h] = .off }
+        activeHost = nil
+        if !host.isEmpty {
+            Task.detached {
+                for r in ports { _ = Tunnel.cancel(host: host, r) }
+                Tunnel.shutdown(host: host)
+            }
+        }
     }
 
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
@@ -327,17 +347,24 @@ final class Store: ObservableObject {
 
     // MARK: 主机连接（下拉选中即连接）
 
-    private func connectHost(_ alias: String) {
+    private func connectHost(_ alias: String, restorePorts: Bool = false) {
         hostState[alias] = .connecting
         activeHost = alias
         config.host = alias
         save()
+        // 记录需要恢复的端口（连接成功后再逐个重建转发）
+        let toRestore = restorePorts ? allRules.filter { active.contains($0.local) } : []
         Task {
             let e = await Task.detached { Tunnel.ensureConnection(host: alias) }.value
             if e != nil {
                 hostState[alias] = .failed
-            } else {
-                hostState[alias] = .on
+                return
+            }
+            hostState[alias] = .on
+            // 恢复退出前已开启的端口转发
+            for r in toRestore {
+                let fwdErr = await Task.detached { Tunnel.forward(host: alias, r) }.value
+                if fwdErr != nil { errors[r.local] = fwdErr } else { errors[r.local] = nil }
             }
         }
     }
@@ -382,6 +409,8 @@ final class Store: ObservableObject {
 
     func open(_ r: Rule) {
         guard let host = connHost else { return }
+        // 已开启则幂等跳过（避免把 ssh 自己占用的端口误判为「被占用」）
+        if active.contains(r.local) { return }
         busy = true
         Task {
             defer { busy = false }
@@ -523,7 +552,7 @@ struct Chip: View {
                 .frame(width: 6, height: 6)
             Text(rule.label)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(hovering ? Color.green : Color.primary)
+                .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .onTapGesture(count: 1) { action() }
@@ -841,9 +870,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Store.shared?.save()
     }
 
-    /// 退出前保存当前设置状态
+    /// 退出前：断开全部映射并保存状态（端口开启状态已先保存，重启可恢复）
     func applicationWillTerminate(_ notification: Notification) {
-        Store.shared?.save()
+        guard let store = Store.shared else { return }
+        store.save()          // 先保存端口开启状态，便于重启恢复
+        store.shutdownAll()   // 再断开全部映射与主机连接
     }
 }
 
