@@ -264,7 +264,6 @@ final class Store: ObservableObject {
     @Published var busy = false
     @Published var quickInput = ""
     @Published var inputInvalid = false                 // 万能输入格式错误（输入框红显）
-    @Published var reloadFailed = false                 // 配置载入失败（按钮文字切换）
 
     @Published var hostAliases: [String] = []
 
@@ -302,35 +301,6 @@ final class Store: ObservableObject {
         for h in visibleHosts where hostState[h] == nil { hostState[h] = .off }
     }
 
-    /// 重新载入配置：重读 ~/.ssh/config + 重读本程序配置文件，
-    /// 并清空「已移除」记录 —— 恢复所有被双击移除的 Host
-    func reloadFromDisk() {
-        let curHost = config.host
-        let curActive = activeHost
-
-        // 读本程序配置；读不到（文件不存在/损坏）则标记失败
-        let url = configURL
-        guard let d = try? Data(contentsOf: url),
-              let c = try? JSONDecoder().decode(Config.self, from: d) else {
-            reloadFailed = true
-            return
-        }
-        config = c
-        config.hiddenHosts = nil          // 恢复全部被移除的 Host
-        config.host = curHost
-        refreshHosts()
-        for h in visibleHosts where hostState[h] == nil { hostState[h] = .off }
-        // 若当前活动主机已不在（被用户从 ssh config 删除），断开并复位
-        if let h = curActive, !visibleHosts.contains(h) {
-            active.removeAll()
-            errors.removeAll()
-            hostState[h] = .off
-            activeHost = nil
-        }
-        save()
-        reloadFailed = false
-    }
-
     /// 启动时：若有选中主机（config.host 非空且可见），自动连接
     func autoConnectIfNeeded() {
         let h = config.host
@@ -351,22 +321,7 @@ final class Store: ObservableObject {
         return h
     }
 
-    // MARK: 主机连接（单击切换 连接/断开）
-
-    /// 单击主机：已连接则断开（变灰）；否则连接（成功绿/失败红）。
-    /// 点击一台主机时，其余所有主机全部回归断开状态。
-    func toggleHost(_ alias: String) {
-        if activeHost == alias {
-            if hostState[alias] == .on { disconnectHost(alias) }
-            return   // connecting 中不重复触发
-        }
-        // 其余主机全部断开
-        for h in hostState.keys where h != alias && hostState[h] != .off {
-            hostState[h] = .off
-        }
-        if let cur = activeHost { disconnectHost(cur) }
-        connectHost(alias)
-    }
+    // MARK: 主机连接（下拉选中即连接）
 
     private func connectHost(_ alias: String) {
         hostState[alias] = .connecting
@@ -395,13 +350,25 @@ final class Store: ObservableObject {
         }
     }
 
-    /// 双击主机：从面板移除（仅隐藏，绝不修改 ~/.ssh/config）
-    func hideHost(_ alias: String) {
-        if activeHost == alias { disconnectHost(alias) }
-        var h = config.hiddenHosts ?? []
-        if !h.contains(alias) { h.append(alias) }
-        config.hiddenHosts = h
-        save()
+    /// 下拉选中主机：选中即连接（已连接则保持）
+    func selectHost(_ alias: String) {
+        if activeHost == alias && hostState[alias] == .on { return }
+        // 其余主机全部断开
+        for h in hostState.keys where h != alias && hostState[h] != .off {
+            hostState[h] = .off
+        }
+        if let cur = activeHost { disconnectHost(cur) }
+        connectHost(alias)
+    }
+
+    /// 主机状态文字（下拉框标题）
+    func hostStatusText(_ alias: String) -> String {
+        switch hostState[alias] ?? .off {
+        case .off: return "断开"
+        case .connecting: return "连接中…"
+        case .on: return "连通"
+        case .failed: return "故障"
+        }
     }
 
     // 单条切换
@@ -504,51 +471,17 @@ final class Store: ObservableObject {
 
 // MARK: - 视图
 
-/// 统一按钮状态色：绿=通，灰=不通，红=故障
-enum PillState {
-    case off, on, failed
-}
-
-/// 统一按钮风格：仅文字 + 文字颜色状态（无边框、无背景填充）
-struct Pill: View {
-    let text: String
-    let state: PillState
-    var fixedWidth: CGFloat? = nil
-
-    private var fg: Color {
-        switch state {
-        case .off: return Color.secondary
-        case .on: return Color.green
-        case .failed: return Color.red
-        }
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 12, weight: state == .off ? .regular : .medium))
-            .foregroundStyle(fg)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: fixedWidth ?? .infinity)
-            .frame(minWidth: fixedWidth)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-    }
-}
-
-/// 端口 chip：单击开关，双击删除；绿=通，灰=不通，红=故障（仅文字着色，无边框/背景）
+/// 端口行：小圆点（三色状态）+ 端口文字（单色）；单击开关，双击删除
 struct Chip: View {
     let rule: Rule
     let on: Bool
     let err: String?
     let action: () -> Void
     let remove: () -> Void
-    var width: CGFloat? = nil
 
-    private var fgColor: Color {
+    private var dotColor: Color {
         if err != nil { return .red }
-        return on ? .green : .secondary
+        return on ? .green : Color.secondary.opacity(0.5)
     }
     private var hint: String {
         if let e = err { return e }
@@ -556,19 +489,23 @@ struct Chip: View {
     }
 
     var body: some View {
-        Text(rule.label)
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(fgColor)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: width ?? .infinity)
-            .frame(minWidth: width)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { remove() }
-            .onTapGesture(count: 1) { action() }
-            .help(hint)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(dotColor)
+                .frame(width: 6, height: 6)
+            Text(rule.label)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { remove() }
+        .onTapGesture(count: 1) { action() }
+        .help(hint)
     }
 }
 
@@ -576,44 +513,29 @@ struct MenuPanel: View {
     @ObservedObject var store: Store
     @FocusState var inputFocused: Bool
 
-    private var hostColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 5), count: 2)
-    }
-    private var portColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 4), count: 3)
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // 主机（每排 2 台；单击连接/断开，双击移除）
-            if store.visibleHosts.isEmpty {
-                Text("~/.ssh/config 里没有可用主机")
-                    .font(.system(size: 11)).foregroundStyle(.orange)
-                    .padding(.vertical, 4)
-            } else {
-                LazyVGrid(columns: hostColumns, spacing: 5) {
-                    ForEach(store.visibleHosts, id: \.self) { alias in
-                        hostButton(alias)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            // 第一项：主机下拉菜单（选中即连接）
+            hostMenu
+                .padding(.horizontal, 10).padding(.vertical, 8)
 
-            // 端口（扁平列表，不分组；单击开关，双击删除）
+            // 端口（单列；小圆点三色 + 单色文字；单击开关，双击删除）
             if store.allRules.isEmpty {
                 Text("在下方输入端口添加")
                     .font(.system(size: 11)).foregroundStyle(.tertiary)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
             } else {
-                LazyVGrid(columns: portColumns, spacing: 4) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(store.allRules) { r in
                         Chip(rule: r, on: store.isOn(r), err: store.error(r),
                              action: { store.toggle(r) },
                              remove: { store.removeRuleAnywhere(r) })
                     }
                 }
+                .padding(.horizontal, 2).padding(.vertical, 2)
             }
 
-            // 万能输入框（唯一入口；格式错误仅文字红显，无外框）
+            // 万能输入框（唯一入口；格式错误仅文字红显）
             HStack(spacing: 6) {
                 Image(systemName: "plus").font(.system(size: 11)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
@@ -631,38 +553,68 @@ struct MenuPanel: View {
             }
             .padding(.horizontal, 9).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
+            .padding(.horizontal, 10).padding(.vertical, 8)
             .onAppear { inputFocused = true }
 
-            // 动作
-            HStack {
-                row(store.reloadFailed ? "无法载入配置" : "重新载入配置", "") {
-                    store.reloadFromDisk()
-                }
-                row("退出", "⌘Q") { NSApplication.shared.terminate(nil) }
+            // 最后一项：退出
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Text("Quit")
+                    .font(.system(size: 11))
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 2).padding(.bottom, 4)
         }
-        .padding(10)
         .frame(width: 220)
     }
 
-    /// 主机按钮：连接中文字切换为「连接中…」，单击连接/断开，双击从面板移除
-    private func hostButton(_ alias: String) -> some View {
-        let st = store.hostState[alias] ?? .off
-        let label: String = st == .connecting ? "连接中…" : alias
-        let state: PillState = st == .on ? .on : (st == .failed ? .failed : .off)
-        return Pill(text: label, state: state, fixedWidth: nil)
-            .onTapGesture(count: 2) { store.hideHost(alias) }
-            .onTapGesture(count: 1) { store.toggleHost(alias) }
-            .help("单击连接/断开 · 双击从面板移除")
+    /// 主机下拉框：标题显示当前状态文字（断开/连接中…/连通/故障），选中即连接
+    private var hostMenu: some View {
+        Menu {
+            ForEach(store.visibleHosts, id: \.self) { alias in
+                Button {
+                    store.selectHost(alias)
+                } label: {
+                    if store.activeHost == alias {
+                        Label(alias, systemImage: "checkmark")
+                    } else {
+                        Text(alias)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(store.activeHost ?? "选择主机")
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer()
+                Text(store.activeHost.map { store.hostStatusText($0) } ?? "")
+                    .font(.system(size: 11))
+                    .foregroundStyle(hostStatusColor)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
+        }
+        .menuStyle(.borderlessButton)
+        .frame(maxWidth: .infinity)
     }
 
-    private func row(_ t: String, _ k: String, _ a: @escaping () -> Void) -> some View {
-        Button(action: a) {
-            Text(t).font(.system(size: 11))
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .contentShape(Rectangle())
+    private var hostStatusColor: Color {
+        guard let h = store.activeHost else { return .secondary }
+        switch store.hostState[h] ?? .off {
+        case .off: return .secondary
+        case .connecting: return .secondary
+        case .on: return .green
+        case .failed: return .red
         }
-        .buttonStyle(.plain)
     }
 }
 
