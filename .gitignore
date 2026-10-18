@@ -10,3 +10,6 @@ config.json
 
 # 工具生成的本地记忆/日志
 .workbuddy/
+
+# CodeBuddy 本地数据
+.codebuddy/
