@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="pmap"
-VERSION="v0.1.2"          # ← 版本号唯一定义处（升级版本只改这里）
+VERSION="${PMAP_VERSION:-v0.1.2}"   # ← 版本号：优先取环境变量 PMAP_VERSION（CI 传入 tag 名），否则用默认值
 BUILD_DIR=".build"
 APP="${APP_NAME}.app"
 BIN="${BUILD_DIR}/${APP_NAME}-univ"

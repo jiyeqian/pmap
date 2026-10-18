@@ -15,27 +15,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Locate SwiftUI macros plugin
-        shell: bash
-        run: |
-          # 通过 swift-frontend 反推 Xcode 工具链目录，动态定位 libSwiftUIMacros.dylib
-          DEVELOPER_DIR="$(dirname "$(dirname "$(xcrun --find swift-frontend)")")"
-          PLUGIN="$(find "$DEVELOPER_DIR" -name 'libSwiftUIMacros.dylib' -path '*MacOSX.platform*' 2>/dev/null | head -1)"
-          if [ -n "$PLUGIN" ]; then
-            echo "SWIFTUI_MACROS_PLUGIN=$PLUGIN" >> "$GITHUB_ENV"
-            echo "发现宏插件：$PLUGIN"
-          else
-            echo "::warning::未找到 libSwiftUIMacros.dylib，将跳过插件加载（产物可用，仅可能多编译警告）"
-          fi
-
       - name: Build universal binary
         shell: bash
-        run: ./build.sh
+        run: |
+          # 版本号取自 tag 名（去掉 v 前缀由 build.sh 处理），确保产物版本与 tag 一致
+          export PMAP_VERSION="${GITHUB_REF_NAME}"
+          echo "构建版本：${PMAP_VERSION}"
+          ./build.sh
 
       - name: Package DMG
         shell: bash
         run: |
-          VERSION="$(grep '^VERSION=' build.sh | cut -d'"' -f2)"
+          VERSION="${GITHUB_REF_NAME}"
           STAGING="$(mktemp -d)"
           cp -R pmap.app "$STAGING/"
           ln -s /Applications "$STAGING/Applications"
