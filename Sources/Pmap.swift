@@ -589,6 +589,7 @@ struct MenuPanel: View {
             HStack(spacing: 6) {
                 Text(store.activeHost ?? "选择主机")
                     .font(.system(size: 12))
+                    .foregroundStyle(hostStatusColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer()
