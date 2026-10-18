@@ -267,7 +267,7 @@ final class Store: ObservableObject {
     @Published var errors: [Int: String] = [:]          // 端口 -> 错误
     @Published var busy = false
     @Published var quickInput = ""
-    @Published var inputInvalid = false                 // 万能输入格式错误（输入框红显）
+    @Published var inputInvalid: String? = nil          // 万能输入错误提示（非空则输入框红显）
 
     @Published var hostAliases: [String] = []
 
@@ -473,21 +473,24 @@ final class Store: ObservableObject {
 
     func commitQuick() {
         guard let (rule, _) = parseQuick(quickInput) else {
-            // 不弹出任何文字破坏面板：清空输入，输入框内红色高亮格式提示
+            // 格式错误：清空输入，输入框内红色高亮格式提示
             quickInput = ""
-            inputInvalid = true
+            inputInvalid = Store.usageHint
             return
         }
-        // 不再分组：端口统一落 adhoc（扁平列表），按 local 去重
+        // 本地端口冲突检查：local 不能重复（远端可重复）
         let samePort = { (r: Rule) in r.local == rule.local }
-        if !adhoc.contains(where: samePort) {
-            adhoc.append(rule)
+        if adhoc.contains(where: samePort) || config.groups.flatMap(\.rules).contains(where: samePort) {
+            quickInput = ""
+            inputInvalid = "本地端口 \(rule.local) 已存在"
+            return
         }
+        adhoc.append(rule)
         quickInput = ""
-        inputInvalid = false
+        inputInvalid = nil
         save()
         // 已连接主机则自动点亮（open 内部会在无连接时保持灰）
-        if !active.contains(rule.local) { open(rule) }
+        open(rule)
     }
 
     /// 删除端口：从列表移除，并停掉映射服务（若该端口正在运行）
@@ -606,20 +609,20 @@ struct MenuPanel: View {
                 .padding(.vertical, 4)
             }
 
-            // 万能输入框（唯一入口；格式错误仅文字红显）
+            // 万能输入框（唯一入口；格式/冲突错误仅文字红显）
             HStack(spacing: 6) {
                 Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
-                          prompt: Text(Store.usageHint)
+                          prompt: Text(store.inputInvalid ?? Store.usageHint)
                               .font(.system(size: 11, design: .monospaced))
-                              .foregroundColor(store.inputInvalid ? .red : .secondary))
+                              .foregroundColor(store.inputInvalid != nil ? .red : .secondary))
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(store.inputInvalid ? Color.red : Color.primary)
+                    .foregroundStyle(store.inputInvalid != nil ? Color.red : Color.primary)
                     .focused($inputFocused)
                     .onSubmit { store.commitQuick() }
                     .onChange(of: store.quickInput) { _, nv in
-                        if !nv.isEmpty { store.inputInvalid = false }
+                        if !nv.isEmpty { store.inputInvalid = nil }
                     }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
