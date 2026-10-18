@@ -843,6 +843,25 @@ enum Snapshot {
     }
 }
 
+/// 万能输入框占位文字探针：与真实输入行同布局、同样式，但用纯 Text 代替
+/// TextField（后者无法被 ImageRenderer 渲染），用于目检占位文字是否完整显示
+struct PromptProbe: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text(Store.usageHint)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .frame(width: 160)
+    }
+}
+
 extension Store {
     static var shared: Store?
 }
@@ -980,6 +999,10 @@ struct PmapApp: App {
            i + 1 < CommandLine.arguments.count {
             let out = CommandLine.arguments[i + 1]
             Snapshot.write(MenuPanel(store: Store()), to: out + ".png")
+            // 附：占位文字探针。ImageRenderer 渲染不了 TextField（输出占位符），
+            // 用与 prompt 完全相同的字体/颜色/lineLimit/minimumScaleFactor 和
+            // 相同的行布局渲染一份纯 Text 替身，用于跨 SDK 目检占位是否被截断。
+            Snapshot.write(PromptProbe(), to: out + "-prompt.png")
             exit(0)
         }
         // 真实渲染导出（非 ImageRenderer）：在深色窗口里用真实 AppKit 渲染面板，
