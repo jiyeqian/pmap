@@ -14,7 +14,8 @@ mkdir -p "$BUILD_DIR"
 
 echo "▸ 编译通用二进制 (x86_64 + arm64)..."
 # CommandLineTools 6.4 缺少 SwiftUI 宏插件（SwiftUIMacros），改用 Xcode 工具链并显式加载
-XCODE_PLUGIN="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib"
+# 路径可通过 SWIFTUI_MACROS_PLUGIN 环境变量覆盖（GitHub Actions 里动态定位），未设置则回退到本地默认路径
+XCODE_PLUGIN="${SWIFTUI_MACROS_PLUGIN:-/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib}"
 MACRO_ARGS=()
 if [ -f "$XCODE_PLUGIN" ]; then
   MACRO_ARGS=(-load-plugin-library "$XCODE_PLUGIN")

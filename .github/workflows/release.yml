@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Locate SwiftUI macros plugin
+        shell: bash
+        run: |
+          # 通过 swift-frontend 反推 Xcode 工具链目录，动态定位 libSwiftUIMacros.dylib
+          DEVELOPER_DIR="$(dirname "$(dirname "$(xcrun --find swift-frontend)")")"
+          PLUGIN="$(find "$DEVELOPER_DIR" -name 'libSwiftUIMacros.dylib' -path '*MacOSX.platform*' 2>/dev/null | head -1)"
+          if [ -n "$PLUGIN" ]; then
+            echo "SWIFTUI_MACROS_PLUGIN=$PLUGIN" >> "$GITHUB_ENV"
+            echo "发现宏插件：$PLUGIN"
+          else
+            echo "::warning::未找到 libSwiftUIMacros.dylib，将跳过插件加载（产物可用，仅可能多编译警告）"
+          fi
+
+      - name: Build universal binary
+        shell: bash
+        run: ./build.sh
+
+      - name: Package DMG
+        shell: bash
+        run: |
+          VERSION="$(grep '^VERSION=' build.sh | cut -d'"' -f2)"
+          STAGING="$(mktemp -d)"
+          cp -R pmap.app "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "pmap" -srcfolder "$STAGING" -ov -format UDZO "pmap-${VERSION}.dmg"
+          echo "DMG_FILE=pmap-${VERSION}.dmg" >> "$GITHUB_ENV"
+          ls -la "pmap-${VERSION}.dmg"
+
+      - name: Create release and upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.DMG_FILE }}
+          generate_release_notes: true
