@@ -457,21 +457,29 @@ final class Store: ObservableObject {
         if !active.contains(rule.local) { open(rule) }
     }
 
-    /// 删除端口：从组或临时列表中移除（扁平视图统一入口）
+    /// 删除端口：从列表移除，并停掉映射服务（若该端口正在运行）
     func removeRuleAnywhere(_ r: Rule) {
         for i in config.groups.indices {
             config.groups[i].rules.removeAll { $0.local == r.local }
         }
         config.groups.removeAll { $0.rules.isEmpty }
         adhoc.removeAll { $0.local == r.local }
-        if active.contains(r.local) { close(r) }
+        // 若端口正在运行，先停掉映射（用当前活动主机，若已断开则用 config.host 兜底）
+        if active.contains(r.local) {
+            let host = connHost ?? config.host
+            if !host.isEmpty {
+                Task.detached { _ = Tunnel.cancel(host: host, r) }
+            }
+            active.remove(r.local)
+            errors[r.local] = nil
+        }
         save()
     }
 }
 
 // MARK: - 视图
 
-/// 端口行：小圆点（三色状态）+ 端口文字（单色）；单击开关，双击删除
+/// 端口行：小圆点（三色状态）+ 端口文字（单色）+ 右侧删除图标
 struct Chip: View {
     let rule: Rule
     let on: Bool
@@ -485,7 +493,7 @@ struct Chip: View {
     }
     private var hint: String {
         if let e = err { return e }
-        return on ? "单击关闭 · 双击删除" : "单击开启 · 双击删除"
+        return on ? "单击关闭" : "单击开启"
     }
 
     var body: some View {
@@ -498,13 +506,20 @@ struct Chip: View {
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .onTapGesture(count: 1) { action() }
             Spacer(minLength: 0)
+            // 删除图标（单击删除）
+            Button(action: remove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("删除端口")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { remove() }
-        .onTapGesture(count: 1) { action() }
         .help(hint)
     }
 }
@@ -515,9 +530,11 @@ struct MenuPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 第一项：主机下拉菜单（选中即连接）
+            // 第一项：主机下拉菜单（选中即连接）；顶部留白更大
             hostMenu
-                .padding(.horizontal, 10).padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
 
             Divider()
 
@@ -560,7 +577,7 @@ struct MenuPanel: View {
 
             Divider()
 
-            // 最后一项：退出
+            // 最后一项：退出；底部留白更大
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
@@ -571,7 +588,9 @@ struct MenuPanel: View {
                     Text("⌘Q")
                         .font(.system(size: 11)).foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 7)
+                .padding(.horizontal, 12)
+                .padding(.top, 7)
+                .padding(.bottom, 13)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -721,6 +740,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.show(relativeTo: anchor, of: btn, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
+    }
+
+    /// 退出前保存当前设置状态
+    func applicationWillTerminate(_ notification: Notification) {
+        Store.shared?.save()
     }
 }
 
