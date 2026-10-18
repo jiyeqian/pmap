@@ -14,6 +14,7 @@ import UserNotifications
 struct Rule: Codable, Hashable, Identifiable {
     var local: Int
     var remote: Int
+    var note: String? = nil   // 端口备注（隐藏高级功能：`#备注` 后缀，可选，老配置无此键时解码为 nil）
     var id: Int { local }
 
     /// 统一按 port:port 显示（即使 local==remote）
@@ -533,14 +534,21 @@ final class Store: ObservableObject {
             let g = String(t[t.index(after: at)...]).trimmingCharacters(in: .whitespaces)
             group = g.isEmpty ? nil : g
         }
+        // 隐藏高级功能：`#` 后缀为端口备注（如 5432:5432#数据库），不在输入框提示
+        var note: String? = nil
+        if let hash = portPart.firstIndex(of: "#") {
+            let n = String(portPart[portPart.index(after: hash)...]).trimmingCharacters(in: .whitespaces)
+            note = n.isEmpty ? nil : n
+            portPart = String(portPart[..<hash]).trimmingCharacters(in: .whitespaces)
+        }
         guard !portPart.isEmpty, !portPart.contains(" ") else { return nil }
         if portPart.contains(":") {
             let p = portPart.split(separator: ":").map(String.init)
             guard p.count == 2, let l = Int(p[0]), let r = Int(p[1]), isValid(l), isValid(r) else { return nil }
-            return (Rule(local: l, remote: r), group)
+            return (Rule(local: l, remote: r, note: note), group)
         }
         guard let l = Int(portPart), isValid(l) else { return nil }
-        return (Rule(local: l, remote: l), group)
+        return (Rule(local: l, remote: l, note: note), group)
     }
 
     private func isValid(_ p: Int) -> Bool { p > 0 && p < 65536 }
@@ -634,7 +642,15 @@ struct Chip: View {
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .layoutPriority(1)   // 端口号优先完整显示，空间不足时截断备注
                 .onTapGesture(count: 1) { action() }
+            if let note = rule.note?.trimmingCharacters(in: .whitespaces), !note.isEmpty {
+                Text(note)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
             Spacer(minLength: 0)
             // 删除图标（单击删除）
             Button(action: remove) {
