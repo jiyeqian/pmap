@@ -12,63 +12,37 @@ cat > "$OUT_DIR/draw.swift" <<'EOF'
 import AppKit
 import CoreGraphics
 
-// 绘制 macOS 风格应用图标：深色圆角底 + 双向箭头（对应菜单栏符号 arrow.left.arrow.right）
+// 用 SF Symbol 原图生成图标，与状态栏图标 100% 同源（arrow.left.arrow.right）
 let size = CGFloat(1024)
 let image = NSImage(size: NSSize(width: size, height: size))
 image.lockFocus()
 
 let ctx = NSGraphicsContext.current!.cgContext
 
-// 背景： macOS 图标是带圆角的方形（系统会自动裁圆角，这里画满格）
+// 背景： macOS 图标是带圆角的方形，这里画满格（系统会自动裁圆角）
 let bgRect = CGRect(x: 0, y: 0, width: size, height: size)
 let bgColor = NSColor(calibratedRed: 0.13, green: 0.15, blue: 0.18, alpha: 1)
 bgColor.setFill()
 ctx.fill(bgRect)
 
-// 细微渐变提升质感
-let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                          colors: [NSColor(calibratedWhite: 0.20, alpha: 1).cgColor,
-                                   NSColor(calibratedWhite: 0.10, alpha: 1).cgColor] as CFArray,
-                          locations: [0, 1])!
-ctx.saveGState()
-ctx.clip(to: bgRect)
-ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: size), end: CGPoint(x: size, y: 0), options: [])
-ctx.restoreGState()
+// 直接使用 SF Symbol 的原生图形（与状态栏同一符号、同一视觉语言）
+if let symbol = NSImage(systemSymbolName: "arrow.left.arrow.right", accessibilityDescription: nil) {
+    let config = NSImage.SymbolConfiguration(pointSize: size * 0.56, weight: .medium)
+    if let configured = symbol.withSymbolConfiguration(config) {
+        // 白色模板图
+        let tinted = NSImage(size: configured.size)
+        tinted.lockFocus()
+        NSColor.white.set()
+        configured.draw(in: NSRect(origin: .zero, size: configured.size))
+        tinted.unlockFocus()
 
-// 中心双向箭头（↔），粗圆头线条
-let stroke = NSColor(calibratedWhite: 0.95, alpha: 1)
-stroke.setStroke()
-let lineWidth = size * 0.07
-let line = NSBezierPath()
-line.lineWidth = lineWidth
-line.lineCapStyle = .round
-let cy = size * 0.5
-let inset = size * 0.22
-line.move(to: NSPoint(x: inset, y: cy))
-line.line(to: NSPoint(x: size - inset, y: cy))
-line.stroke()
-
-// 左箭头头
-func arrowHead(atX x: CGFloat, dirRight: Bool) {
-    let head = NSBezierPath()
-    head.lineWidth = lineWidth
-    head.lineCapStyle = .round
-    let len = size * 0.11
-    let spread = size * 0.09
-    let sign: CGFloat = dirRight ? 1 : -1
-    head.move(to: NSPoint(x: x, y: cy))
-    head.line(to: NSPoint(x: x + sign * len, y: cy + spread))
-    head.move(to: NSPoint(x: x, y: cy))
-    head.line(to: NSPoint(x: x + sign * len, y: cy - spread))
-    head.stroke()
+        let target = NSSize(width: size * 0.72, height: size * 0.72)
+        let origin = NSPoint(x: (size - target.width) / 2, y: (size - target.height) / 2)
+        tinted.draw(in: NSRect(origin: origin, size: target),
+                    from: NSRect(origin: .zero, size: tinted.size),
+                    operation: .sourceOver, fraction: 1.0)
+    }
 }
-arrowHead(atX: inset, dirRight: false)   // 左端箭头（指向左）
-arrowHead(atX: size - inset, dirRight: true) // 右端箭头（指向右）
-
-// 绿色小圆点表示「连通」主题，右下角
-let dot = NSBezierPath(ovalIn: CGRect(x: size * 0.74, y: size * 0.16, width: size * 0.11, height: size * 0.11))
-NSColor(calibratedRed: 0.11, green: 0.62, blue: 0.46, alpha: 1).setFill()
-dot.fill()
 
 image.unlockFocus()
 
