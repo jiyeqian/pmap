@@ -9,140 +9,6 @@ import AppKit
 import Combine
 import UserNotifications
 
-// MARK: - 模型
-
-struct Rule: Codable, Hashable, Identifiable {
-    var local: Int
-    var remote: Int
-    var note: String? = nil   // 端口备注（隐藏高级功能：`#备注` 后缀，可选，老配置无此键时解码为 nil）
-    var id: Int { local }
-
-    /// 统一按 port:port 显示（即使 local==remote）
-    var label: String { "\(local):\(remote)" }
-}
-
-struct Group: Codable, Identifiable {
-    var name: String
-    var rules: [Rule] = []
-    var id: String { name }
-}
-
-struct Config: Codable {
-    var host: String = ""
-    var groups: [Group] = []
-    /// 端口列表（扁平，不再分组）——持久化端口
-    var adhoc: [Rule]? = nil
-    /// 已开启的本地端口（退出前保存，重启后恢复转发状态）
-    var active: [Int]? = nil
-    /// 从面板移除的主机（仅面板层隐藏，绝不修改 ~/.ssh/config）
-    var hiddenHosts: [String]? = nil
-}
-
-/// `ssh -G <host>` 展开出的连接参数
-struct SSHTarget: Equatable {
-    var alias: String
-    var user: String = ""
-    var hostname: String = ""
-    var port: Int = 22
-    var proxyJump: String = ""
-    var identityFile: String = ""
-
-    /// 别名未在 ~/.ssh/config 中定义时，ssh -G 会把字符串原样当 hostname
-    var aliasDefined: Bool { !hostname.isEmpty && hostname != alias }
-}
-
-enum HostConn: Equatable {
-    case off          // 灰：未连接
-    case connecting   // 灰：连接中
-    case on           // 绿：已连接
-    case failed       // 红：连接失败
-}
-
-// MARK: - SSH 配置解析
-
-enum SSHConfig {
-    static func listHosts() -> [String] {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let path = home + "/.ssh/config"
-        return parseHosts((try? String(contentsOfFile: path, encoding: .utf8)) ?? "", selfAliases: localAliases())
-    }
-
-    /// 解析 ssh_config 文本，收集所有具体主机别名
-    /// - 跳过通配符（`*` `?` `!`）与含点的地址
-    /// - 跳过会在 `ssh -G` 里解析成自身的条目
-    static func parseHosts(_ text: String, selfAliases: Set<String> = []) -> [String] {
-        var hosts: [String] = []
-        for raw in text.components(separatedBy: .newlines) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-
-            // Host / HostName / HostKeyAlias 都可能是 "host" 开头，按空白切分后精确比对
-            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            guard let key = parts.first?.lowercased(), key == "host" else { continue }
-            guard parts.count > 1 else { continue }
-
-            for token in parts.dropFirst() {
-                // ssh_config 允许 `Host a b c` 一行多个别名，也允许逗号分隔
-                for rawName in token.split(separator: ",").map(String.init) {
-                    let name = rawName.trimmingCharacters(in: .whitespaces)
-                    guard !name.isEmpty else { continue }
-                    // 通配、否定、含点（多为直接写地址）
-                    if name.contains(where: { "*?!".contains($0) }) { continue }
-                    if name.contains(".") { continue }
-                    if selfAliases.contains(name) { continue }
-                    if !hosts.contains(name) { hosts.append(name) }
-                }
-            }
-        }
-        return hosts
-    }
-
-    /// 跳过指向本机的条目（通常没人想给自己开隧道）
-    private static func localAliases() -> Set<String> {
-        var out: Set<String> = []
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let path = home + "/.ssh/config"
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return out }
-
-        var current: String?
-        for raw in text.components(separatedBy: .newlines) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            guard parts.count > 1 else { continue }
-            switch parts[0].lowercased() {
-            case "host":
-                current = parts[1]
-            case "hostname":
-                let h = parts[1].lowercased()
-                if h == "localhost" || h == "127.0.0.1" || h == "::1" { if let c = current { out.insert(c) } }
-            default: break
-            }
-        }
-        return out
-    }
-
-    /// 用 ssh -G 展开别名，得到最终生效的连接参数
-    static func resolve(_ alias: String) -> SSHTarget? {
-        guard let out = Shell.run("/usr/bin/ssh", ["-G", alias]) else { return nil }
-        var t = SSHTarget(alias: alias)
-        for line in out.components(separatedBy: .newlines) {
-            let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { continue }
-            switch parts[0] {
-            case "user": t.user = parts[1]
-            case "hostname": t.hostname = parts[1]
-            case "port": t.port = Int(parts[1]) ?? 22
-            case "proxyjump": t.proxyJump = parts[1]
-            case "identityfile": if t.identityFile.isEmpty { t.identityFile = parts[1] }
-            default: break
-            }
-        }
-        guard !t.hostname.isEmpty else { return nil }
-        return t
-    }
-}
-
 // MARK: - 系统通知
 
 enum Notifier {
@@ -161,60 +27,6 @@ enum Notifier {
         let request = UNNotificationRequest(identifier: UUID().uuidString,
                                             content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
-    }
-}
-
-// MARK: - Shell
-
-enum Shell {
-    @discardableResult
-    static func run(_ path: String, _ args: [String]) -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = args
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = Pipe()
-        do { try p.run() } catch { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func ssh(_ args: [String]) -> (code: Int32, err: String) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        p.arguments = args
-        let out = Pipe()
-        let err = Pipe()
-        p.standardOutput = out
-        p.standardError = err
-        do { try p.run() } catch { return (-1, "\(error)") }
-        let e = err.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return (p.terminationStatus, String(data: e, encoding: .utf8) ?? "")
-    }
-
-    /// 本地端口是否被占用
-    static func portBusy(_ port: Int) -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        p.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = Pipe()
-        do { try p.run() } catch { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return nil }
-        let text = String(data: data, encoding: .utf8) ?? ""
-        guard !text.isEmpty else { return nil }
-        // 解析进程名
-        for line in text.components(separatedBy: .newlines).dropFirst() {
-            let parts = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            if parts.count > 1 { return parts[1] }
-        }
-        return "unknown"
     }
 }
 
@@ -523,43 +335,11 @@ final class Store: ObservableObject {
         }
     }
 
-    // 万能入口解析：port 或 port:port（@组名 已不再分组，忽略 @ 后内容）
-    func parseQuick(_ s: String) -> (rule: Rule, group: String?)? {
-        let t = s.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty else { return nil }
-        var portPart = t
-        var group: String? = nil
-        if let at = t.firstIndex(of: "@") {
-            portPart = String(t[..<at]).trimmingCharacters(in: .whitespaces)
-            let g = String(t[t.index(after: at)...]).trimmingCharacters(in: .whitespaces)
-            group = g.isEmpty ? nil : g
-        }
-        // 隐藏高级功能：`#` 后缀为端口备注（如 5432:5432#数据库），不在输入框提示
-        var note: String? = nil
-        if let hash = portPart.firstIndex(of: "#") {
-            let n = String(portPart[portPart.index(after: hash)...]).trimmingCharacters(in: .whitespaces)
-            note = n.isEmpty ? nil : n
-            portPart = String(portPart[..<hash]).trimmingCharacters(in: .whitespaces)
-        }
-        guard !portPart.isEmpty, !portPart.contains(" ") else { return nil }
-        if portPart.contains(":") {
-            let p = portPart.split(separator: ":").map(String.init)
-            guard p.count == 2, let l = Int(p[0]), let r = Int(p[1]), isValid(l), isValid(r) else { return nil }
-            return (Rule(local: l, remote: r, note: note), group)
-        }
-        guard let l = Int(portPart), isValid(l) else { return nil }
-        return (Rule(local: l, remote: l, note: note), group)
-    }
-
-    private func isValid(_ p: Int) -> Bool { p > 0 && p < 65536 }
-
-    static var usageHint: String { "port/port:port" }
-
     func commitQuick() {
-        guard let (rule, _) = parseQuick(quickInput) else {
+        guard let (rule, _) = parseQuickInput(quickInput) else {
             // 格式错误：清空输入，输入框内红色高亮格式提示
             quickInput = ""
-            inputInvalid = Store.usageHint
+            inputInvalid = usageHint
             return
         }
         // 本地端口冲突检查：local 不能重复（远端可重复）
@@ -705,7 +485,7 @@ struct MenuPanel: View {
             HStack(spacing: 6) {
                 Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
-                          prompt: Text(store.inputInvalid ?? Store.usageHint)
+                          prompt: Text(store.inputInvalid ?? usageHint)
                               .font(.system(size: 11, design: .monospaced))
                               .foregroundColor(store.inputInvalid != nil ? .red : .secondary))
                     .textFieldStyle(.plain)
@@ -865,7 +645,7 @@ struct PromptProbe: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
-            Text(Store.usageHint)
+            Text(usageHint)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.secondary)
                 .lineLimit(1)

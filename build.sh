@@ -22,7 +22,13 @@ if [ -f "$XCODE_PLUGIN" ]; then
 fi
 
 # 将版本号注入源码占位符，保证 appVersion 与 Info.plist 完全一致（单一来源 VERSION）
-sed "s/__PMAP_VERSION__/${VERSION}/g" Sources/Pmap.swift > "${BUILD_DIR}/Pmap.generated.swift"
+# __PMAP_VERSION__ 仅出现在 Pmap.swift，但对全部源文件统一 sed 更稳健（其它文件无匹配则原样通过）
+SOURCES=()
+for src in Sources/*.swift; do
+  gen="${BUILD_DIR}/$(basename "$src" .swift).generated.swift"
+  sed "s/__PMAP_VERSION__/${VERSION}/g" "$src" > "$gen"
+  SOURCES+=("$gen")
+done
 
 for ARCH in x86_64 arm64; do
   xcrun swiftc -O -parse-as-library \
@@ -30,7 +36,7 @@ for ARCH in x86_64 arm64; do
     -framework SwiftUI -framework AppKit -framework Combine \
     "${MACRO_ARGS[@]}" \
     -o "${BUILD_DIR}/${APP_NAME}-${ARCH}" \
-    "${BUILD_DIR}/Pmap.generated.swift"
+    "${SOURCES[@]}"
   echo "  ✓ ${ARCH}"
 done
 
