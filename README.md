@@ -1,5 +1,7 @@
 # pmap
 
+[![Release](https://github.com/jiyeqian/pmap/actions/workflows/release.yml/badge.svg)](https://github.com/jiyeqian/pmap/actions/workflows/release.yml)
+
 macOS 菜单栏端口映射（SSH 端口转发）管理器。用一个极简的弹出面板，点选主机、开关端口，秒级建立 / 断开本地到远程的端口转发，无需记忆 `ssh -L` 命令。
 
 > 基于 SSH ControlMaster 连接复用：首次连接后，之后的开 / 关端口都走同一条已建立的连接，几乎零延迟。
@@ -116,7 +118,8 @@ pmap 会在启动时读取、退出时保存以下文件：
   "host": "myserver",
   "adhoc": [
     { "local": 8000, "remote": 8000 },
-    { "local": 3000, "remote": 80 }
+    { "local": 3000, "remote": 80 },
+    { "local": 5432, "remote": 5432, "note": "数据库" }
   ],
   "active": [ 8000 ]
 }
@@ -173,4 +176,4 @@ pmap 使用独立的 ControlPath 目录，不依赖 `~/.ssh/config` 中是否启
 
 ## License
 
-本项目当前未指定开源许可证（Private 仓库，仅供个人使用）。
+本项目采用 [MIT License](LICENSE) 开源。
