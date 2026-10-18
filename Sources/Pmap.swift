@@ -436,7 +436,7 @@ final class Store: ObservableObject {
 
     private func isValid(_ p: Int) -> Bool { p > 0 && p < 65536 }
 
-    static var usageHint: String { "格式：port/port:port@组名" }
+    static var usageHint: String { "port/port:port" }
 
     func commitQuick() {
         guard let (rule, _) = parseQuick(quickInput) else {
@@ -489,19 +489,19 @@ struct Chip: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Circle()
                 .fill(dotColor)
                 .frame(width: 6, height: 6)
             Text(rule.label)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { remove() }
         .onTapGesture(count: 1) { action() }
@@ -519,11 +519,13 @@ struct MenuPanel: View {
             hostMenu
                 .padding(.horizontal, 10).padding(.vertical, 8)
 
+            Divider()
+
             // 端口（单列；小圆点三色 + 单色文字；单击开关，双击删除）
             if store.allRules.isEmpty {
                 Text("在下方输入端口添加")
                     .font(.system(size: 11)).foregroundStyle(.tertiary)
-                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(store.allRules) { r in
@@ -532,12 +534,12 @@ struct MenuPanel: View {
                              remove: { store.removeRuleAnywhere(r) })
                     }
                 }
-                .padding(.horizontal, 2).padding(.vertical, 2)
+                .padding(.vertical, 4)
             }
 
             // 万能输入框（唯一入口；格式错误仅文字红显）
             HStack(spacing: 6) {
-                Image(systemName: "plus").font(.system(size: 11)).foregroundStyle(.tertiary)
+                Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
                           prompt: Text(Store.usageHint)
                               .font(.system(size: 11, design: .monospaced))
@@ -551,22 +553,28 @@ struct MenuPanel: View {
                         if !nv.isEmpty { store.inputInvalid = false }
                     }
             }
-            .padding(.horizontal, 9).padding(.vertical, 7)
+            .padding(.horizontal, 10).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
             .padding(.horizontal, 10).padding(.vertical, 8)
             .onAppear { inputFocused = true }
+
+            Divider()
 
             // 最后一项：退出
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
-                Text("Quit")
-                    .font(.system(size: 11))
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .contentShape(Rectangle())
+                HStack {
+                    Text("Quit")
+                        .font(.system(size: 11))
+                    Spacer()
+                    Text("⌘Q")
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 2).padding(.bottom, 4)
         }
         .frame(width: 220)
     }
@@ -708,7 +716,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            popover.show(relativeTo: btn.bounds, of: btn, preferredEdge: .minY)
+            // 锚点取图标左缘的窄条，使面板左对齐图标（而非中部对齐）
+            let anchor = NSRect(x: 0, y: 0, width: 6, height: btn.bounds.height)
+            popover.show(relativeTo: anchor, of: btn, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
     }
