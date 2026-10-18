@@ -15,12 +15,12 @@ struct Rule: Codable, Hashable, Identifiable {
     var remote: Int
     var id: Int { local }
 
-    var label: String { local == remote ? "\(local)" : "\(local):\(remote)" }
+    /// 统一按 port:port 显示（即使 local==remote）
+    var label: String { "\(local):\(remote)" }
 }
 
 struct Group: Codable, Identifiable {
     var name: String
-    var desc: String = ""
     var rules: [Rule] = []
     var id: String { name }
 }
@@ -264,6 +264,7 @@ final class Store: ObservableObject {
     @Published var busy = false
     @Published var quickInput = ""
     @Published var inputInvalid = false                 // 万能输入格式错误（输入框红显）
+    @Published var reloadFailed = false                 // 配置载入失败（按钮文字切换）
 
     @Published var hostAliases: [String] = []
 
@@ -306,12 +307,15 @@ final class Store: ObservableObject {
     func reloadFromDisk() {
         let curHost = config.host
         let curActive = activeHost
-        config = Config()
+
+        // 读本程序配置；读不到（文件不存在/损坏）则标记失败
         let url = configURL
-        if let d = try? Data(contentsOf: url),
-           let c = try? JSONDecoder().decode(Config.self, from: d) {
-            config = c
+        guard let d = try? Data(contentsOf: url),
+              let c = try? JSONDecoder().decode(Config.self, from: d) else {
+            reloadFailed = true
+            return
         }
+        config = c
         config.hiddenHosts = nil          // 恢复全部被移除的 Host
         config.host = curHost
         refreshHosts()
@@ -324,6 +328,14 @@ final class Store: ObservableObject {
             activeHost = nil
         }
         save()
+        reloadFailed = false
+    }
+
+    /// 启动时：若有选中主机（config.host 非空且可见），自动连接
+    func autoConnectIfNeeded() {
+        let h = config.host
+        guard !h.isEmpty, visibleHosts.contains(h), hostState[h] == .off else { return }
+        connectHost(h)
     }
 
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
@@ -495,7 +507,7 @@ final class Store: ObservableObject {
 
     private func isValid(_ p: Int) -> Bool { p > 0 && p < 65536 }
 
-    static var usageHint: String { "格式：port @组名 或 port:port @组名" }
+    static var usageHint: String { "格式：port/port:port@组名" }
 
     func commitQuick() {
         guard let (rule, group) = parseQuick(quickInput) else {
@@ -590,10 +602,11 @@ enum PillState {
     case off, on, failed
 }
 
-/// 统一按钮风格：文字 + 圆角矩形框
+/// 统一按钮风格：文字 + 圆角矩形框；可固定宽度，超出文字截断
 struct Pill: View {
     let text: String
     let state: PillState
+    var fixedWidth: CGFloat? = nil
 
     private var fill: Color {
         switch state {
@@ -621,11 +634,15 @@ struct Pill: View {
         Text(text)
             .font(.system(size: 12, weight: state == .off ? .regular : .medium))
             .foregroundStyle(fg)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: fixedWidth ?? .infinity)
+            .frame(minWidth: fixedWidth)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(fill))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(border, lineWidth: 0.8))
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .background(RoundedRectangle(cornerRadius: 5).fill(fill))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(border, lineWidth: 0.8))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
     }
 }
 
@@ -636,6 +653,7 @@ struct Chip: View {
     let err: String?
     let action: () -> Void
     let remove: () -> Void
+    var width: CGFloat? = nil   // 统一宽度，3 个一排
 
     private var fgColor: Color {
         if err != nil { return .red }
@@ -660,6 +678,10 @@ struct Chip: View {
         Text(rule.label)
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(fgColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: width ?? .infinity)
+            .frame(minWidth: width)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(RoundedRectangle(cornerRadius: 5).fill(fillColor))
@@ -671,7 +693,7 @@ struct Chip: View {
     }
 }
 
-/// 组行：组名按钮（单击全组开关，双击删组）+ 端口 chips
+/// 组行：组名居中 + 分段指示线 + 端口 3 个一排（最多 9 个）
 struct GroupRow: View {
     @ObservedObject var store: Store
     let group: Group
@@ -687,9 +709,15 @@ struct GroupRow: View {
         return .off
     }
 
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 4), count: 3)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(spacing: 6) {
+            // 组名：居中
             Pill(text: group.name, state: groupState)
+                .frame(maxWidth: .infinity)
                 .onTapGesture(count: 2) {
                     adhocGroup ? store.clearAdhoc() : store.removeGroup(group)
                 }
@@ -697,8 +725,12 @@ struct GroupRow: View {
                 .help(adhocGroup ? "单击全组开关 · 双击清空临时端口"
                       : "单击全组开关 · 双击删除该组")
 
+            // 分段指示线：按端口数量分段，点亮时对应段变绿
+            segmentBar
+
+            // 端口：3 个一排
             if !group.rules.isEmpty {
-                FlowRow(spacing: 4) {
+                LazyVGrid(columns: columns, alignment: .center, spacing: 4) {
                     ForEach(group.rules) { r in
                         Chip(rule: r, on: store.isOn(r), err: store.error(r),
                              action: { store.toggle(r) },
@@ -706,11 +738,22 @@ struct GroupRow: View {
                                       : store.removeRule(r, from: group) })
                     }
                 }
-                .padding(.leading, 4)
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 8)
+    }
+
+    /// 指示线：分成端口数量一致的段，点亮端口对应段变绿
+    private var segmentBar: some View {
+        HStack(spacing: 2) {
+            ForEach(group.rules) { r in
+                let segOn = store.active.contains(r.local)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(segOn ? Color.green : Color.secondary.opacity(0.3))
+                    .frame(height: 2)
+            }
+        }
     }
 }
 
@@ -749,16 +792,20 @@ struct MenuPanel: View {
     @ObservedObject var store: Store
     @FocusState var inputFocused: Bool
 
+    private var hostColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 5), count: 2)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 主机（单击连接/断开，双击移除）
+            // 主机（每排 2 台；单击连接/断开，双击移除）
             VStack(alignment: .leading, spacing: 6) {
                 if store.visibleHosts.isEmpty {
                     Text("~/.ssh/config 里没有可用主机")
                         .font(.system(size: 11)).foregroundStyle(.orange)
                         .padding(.vertical, 4)
                 } else {
-                    FlowRow(spacing: 5) {
+                    LazyVGrid(columns: hostColumns, spacing: 5) {
                         ForEach(store.visibleHosts, id: \.self) { alias in
                             hostButton(alias)
                         }
@@ -772,7 +819,7 @@ struct MenuPanel: View {
             // 组（组名单击全组开关/双击删组；端口单击开关/双击删除）
             VStack(alignment: .leading, spacing: 8) {
                 if store.config.groups.isEmpty && store.adhoc.isEmpty {
-                    Text("在下方输入 3000 @web 建组并加端口")
+                    Text("在下方输入端口建组")
                         .font(.system(size: 11)).foregroundStyle(.tertiary)
                         .padding(.vertical, 4)
                 }
@@ -789,7 +836,7 @@ struct MenuPanel: View {
 
             Divider()
 
-            // 万能输入框（唯一入口；格式错误在框内红色提示，不弹出文字）
+            // 万能输入框（唯一入口；格式错误仅文字红显，无外框）
             HStack(spacing: 6) {
                 Image(systemName: "plus").font(.system(size: 11)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
@@ -806,10 +853,9 @@ struct MenuPanel: View {
                     }
             }
             .padding(.horizontal, 9).padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.1)))
-            .overlay(RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(store.inputInvalid ? Color.red.opacity(0.6) : Color.secondary.opacity(0.2),
-                              lineWidth: 0.8))
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 0.8))
             .padding(.horizontal, 10).padding(.vertical, 9)
             .onAppear { inputFocused = true }
 
@@ -817,20 +863,23 @@ struct MenuPanel: View {
 
             // 动作
             VStack(spacing: 1) {
-                row("重新载入配置", "") { store.reloadFromDisk() }
+                row(store.reloadFailed ? "无法载入配置" : "重新载入配置", "") {
+                    store.reloadFromDisk()
+                }
                 Divider().padding(.vertical, 3)
                 row("退出", "⌘Q") { NSApplication.shared.terminate(nil) }
             }
             .padding(.horizontal, 6).padding(.vertical, 4)
         }
-        .frame(width: 360)
+        .frame(width: 320)
     }
 
-    /// 主机按钮：单击连接/断开，双击从面板移除（不改 ~/.ssh/config）
+    /// 主机按钮：连接中文字切换为「连接中…」，单击连接/断开，双击从面板移除
     private func hostButton(_ alias: String) -> some View {
         let st = store.hostState[alias] ?? .off
+        let label: String = st == .connecting ? "连接中…" : alias
         let state: PillState = st == .on ? .on : (st == .failed ? .failed : .off)
-        return Pill(text: alias, state: state)
+        return Pill(text: label, state: state, fixedWidth: nil)
             .onTapGesture(count: 2) { store.hideHost(alias) }
             .onTapGesture(count: 1) { store.toggleHost(alias) }
             .help("单击连接/断开 · 双击从面板移除")
@@ -925,10 +974,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 弹出面板
         popover.behavior = .transient          // 点击面板外自动关闭，行为同菜单
-        let vc = NSHostingController(rootView: MenuPanel(store: store).frame(width: 360))
+        let vc = NSHostingController(rootView: MenuPanel(store: store).frame(width: 320))
         vc.sizingOptions = .preferredContentSize   // 自适应内容高度，避免截断
-        popover.contentSize = NSSize(width: 360, height: 640)
+        popover.contentSize = NSSize(width: 320, height: 640)
         popover.contentViewController = vc
+
+        // 启动时：若有选中主机，自动连接
+        store.autoConnectIfNeeded()
     }
 
     @objc private func togglePopover(_ sender: Any?) {
