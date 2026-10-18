@@ -35,6 +35,11 @@ lipo -create "${BUILD_DIR}/${APP_NAME}-x86_64" "${BUILD_DIR}/${APP_NAME}-arm64" 
      -output "$BIN"
 mv "$BIN" "${APP}/Contents/MacOS/${APP_NAME}"
 
+# 生成应用图标（如不存在）
+if [ ! -f "${APP}/Contents/Resources/AppIcon.icns" ]; then
+  ./make_icon.sh >/dev/null 2>&1 || echo "  ⚠ 图标生成失败（跳过）"
+fi
+
 cat > "${APP}/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -44,6 +49,7 @@ cat > "${APP}/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>pmap</string>
     <key>CFBundleExecutable</key><string>pmap</string>
     <key>CFBundleIdentifier</key><string>dev.local.pmap</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleVersion</key><string>0.1.0</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundlePackageType</key><string>APPL</string>
