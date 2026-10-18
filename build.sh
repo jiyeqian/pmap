@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="pmap"
+VERSION="v0.1.1"          # ← 版本号唯一定义处（升级版本只改这里）
 BUILD_DIR=".build"
 APP="${APP_NAME}.app"
 BIN="${BUILD_DIR}/${APP_NAME}-univ"
@@ -18,13 +19,17 @@ MACRO_ARGS=()
 if [ -f "$XCODE_PLUGIN" ]; then
   MACRO_ARGS=(-load-plugin-library "$XCODE_PLUGIN")
 fi
+
+# 将版本号注入源码占位符，保证 appVersion 与 Info.plist 完全一致（单一来源 VERSION）
+sed "s/__PMAP_VERSION__/${VERSION}/g" Sources/Pmap.swift > "${BUILD_DIR}/Pmap.generated.swift"
+
 for ARCH in x86_64 arm64; do
   xcrun swiftc -O -parse-as-library \
     -target ${ARCH}-apple-macos14.0 \
     -framework SwiftUI -framework AppKit -framework Combine \
     "${MACRO_ARGS[@]}" \
     -o "${BUILD_DIR}/${APP_NAME}-${ARCH}" \
-    Sources/Pmap.swift
+    "${BUILD_DIR}/Pmap.generated.swift"
   echo "  ✓ ${ARCH}"
 done
 
@@ -40,7 +45,7 @@ if [ ! -f "${APP}/Contents/Resources/AppIcon.icns" ]; then
   ./make_icon.sh >/dev/null 2>&1 || echo "  ⚠ 图标生成失败（跳过）"
 fi
 
-cat > "${APP}/Contents/Info.plist" <<'PLIST'
+cat > "${APP}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -50,8 +55,8 @@ cat > "${APP}/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key><string>pmap</string>
     <key>CFBundleIdentifier</key><string>dev.local.pmap</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundleVersion</key><string>v0.1.1</string>
-    <key>CFBundleShortVersionString</key><string>v0.1.1</string>
+    <key>CFBundleVersion</key><string>${VERSION}</string>
+    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>

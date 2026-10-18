@@ -674,7 +674,8 @@ struct MenuPanel: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "v0.1.1"
+        // 优先读 Info.plist；读不到则用编译期注入的 __PMAP_VERSION__ 兜底
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "__PMAP_VERSION__"
     }
 
     /// 主机下拉框：标题显示当前状态文字（断开/连接中…/连通/故障），选中即连接
