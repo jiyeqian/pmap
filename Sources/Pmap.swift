@@ -674,7 +674,7 @@ struct MenuPanel: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "v0.1.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "v0.1.1"
     }
 
     /// 主机下拉框：标题显示当前状态文字（断开/连接中…/连通/故障），选中即连接
