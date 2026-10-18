@@ -7,6 +7,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import UserNotifications
 
 // MARK: - 模型
 
@@ -138,6 +139,27 @@ enum SSHConfig {
         }
         guard !t.hostname.isEmpty else { return nil }
         return t
+    }
+}
+
+// MARK: - 系统通知
+
+enum Notifier {
+    /// 申请通知授权（首次启动时调用）
+    static func requestAuthorization() {
+        UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    /// 发送一条系统通知
+    static func post(title: String, body: String, sound: UNNotificationSound = .default) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = sound
+        let request = UNNotificationRequest(identifier: UUID().uuidString,
+                                            content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
 }
 
@@ -392,6 +414,7 @@ final class Store: ObservableObject {
     private func startHeartbeat(host: String) {
         heartbeatTask?.cancel()
         heartbeatTask = Task { [weak self] in
+            var wasDown = false   // 上一次检测是否为「已断开」，避免重复发通知
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
                 if Task.isCancelled { break }
@@ -399,6 +422,12 @@ final class Store: ObservableObject {
                 // 后台检测连接是否存活
                 let alive = await Task.detached { Tunnel.check(host: host) }.value
                 if !alive {
+                    // 首次发现断线：发通知
+                    if !wasDown {
+                        Notifier.post(title: "pmap 连接断开",
+                                      body: "主机 \(host) 已断开，正在自动重连…")
+                        wasDown = true
+                    }
                     // 断线：保留 active（记住哪些端口该开），自动重连并恢复
                     self.hostState[host] = .connecting
                     let toRestore = self.allRules.filter { self.active.contains($0.local) }
@@ -412,6 +441,12 @@ final class Store: ObservableObject {
                         let fwdErr = await Task.detached { Tunnel.forward(host: host, r) }.value
                         if fwdErr != nil { self.errors[r.local] = fwdErr } else { self.errors[r.local] = nil }
                     }
+                    // 重连成功：发通知
+                    Notifier.post(title: "pmap 已重连",
+                                  body: "主机 \(host) 连接已恢复，\(toRestore.count) 个端口转发已重建")
+                    wasDown = false
+                } else {
+                    wasDown = false
                 }
             }
         }
@@ -824,6 +859,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let store = Store.shared else { return }
+
+        // 申请系统通知授权（断线/重连提醒）
+        Notifier.requestAuthorization()
 
         // 菜单栏图标 + 转发计数
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
