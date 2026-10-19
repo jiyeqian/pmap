@@ -41,7 +41,7 @@ open pmap.app
 
 构建产物 `pmap.app` 是 Intel + Apple Silicon 通用二进制。
 
-- 应用图标（`AppIcon.icns`）由 `make_icon.sh` 生成：深灰黑背景 + 白色双向箭头（SF Symbol `arrow.left.arrow.right`），与菜单栏图标同源。`build.sh` 会在图标不存在时自动调用它；如需单独重新生成，运行 `./make_icon.sh` 即可。
+- 应用图标（`AppIcon.icns`）由 `make_icon.sh` 生成：深灰黑背景 + 白色圆环与胶囊竖笔 + 绿色圆点（`p` 与上下翻转 `p` 绕中心旋转对称、共享一个圆环与圆点，表达端口相连），与菜单栏图标同源，绘制逻辑集中在 `Sources/IconDrawing.swift`。`build.sh` 会在图标不存在时自动调用它；如需单独重新生成，运行 `./make_icon.sh` 即可。
 - 单元测试用 `./test.sh` 运行（Swift Testing 框架，覆盖端口解析 / SSH 配置解析等纯函数）。
 
 > 构建依赖 Xcode 工具链（macOS 自带 CommandLineTools 6.4 缺少 SwiftUI 宏插件，`build.sh` 会自动检测并加载 Xcode 里的 `libSwiftUIMacros.dylib`）。
@@ -68,7 +68,7 @@ xattr -cr /Applications/pmap.app
 
 ## 使用
 
-1. 点击菜单栏的「双向箭头」图标，弹出面板。
+1. 点击菜单栏图标（圆环 + 圆点，圆点随状态染色：绿=连通、红=故障、灰=空闲），弹出面板。
 2. **选择主机**：点击顶部下拉框，选一台主机即自动连接（连接成功后文字变绿）。
 3. **添加端口**：在底部输入框输入 `8000` 或 `8000:80`，回车。有主机已连接时会自动开启转发。
 4. **开关端口**：单击端口行切换开启 / 关闭。

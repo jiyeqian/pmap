@@ -672,6 +672,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panel: PanelWindow?
     private var countObserver: AnyCancellable?
+    private var appearanceObserver: NSKeyValueObservation?
     private var eventMonitors: [Any] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -684,23 +685,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
         if let btn = item.button {
-            let img = NSImage(systemSymbolName: "arrow.left.arrow.right",
-                              accessibilityDescription: "pmap")
-            img?.isTemplate = true
-            btn.image = img
             btn.action = #selector(togglePanel(_:))
             btn.target = self
         }
-        // onCount 是计算属性（依赖 active/config/adhoc），合并监听这些来源的变化
+        refreshStatusIcon()
+
+        // 状态变化（转发计数标题 + 图标染色）：合并监听所有相关来源
         let any = store.$active.map { _ in () }.eraseToAnyPublisher()
         let cfg = store.$config.map { _ in () }.eraseToAnyPublisher()
         let adh = store.$adhoc.map { _ in () }.eraseToAnyPublisher()
-        countObserver = Publishers.MergeMany(any, cfg, adh)
+        let hs = store.$hostState.map { _ in () }.eraseToAnyPublisher()
+        let err = store.$errors.map { _ in () }.eraseToAnyPublisher()
+        let ah = store.$activeHost.map { _ in () }.eraseToAnyPublisher()
+        countObserver = Publishers.MergeMany(any, cfg, adh, hs, err, ah)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self, let store = Store.shared else { return }
-                self.statusItem?.button?.title = store.onCount > 0 ? " \(store.onCount)" : ""
+                self?.refreshStatusIcon()
             }
+
+        // 系统深浅色外观切换时刷新前景色（状态栏非 template，需手动适配）
+        // AppKit 无 appearance 变化通知，官方推荐 KVO 观察 NSApplication.effectiveAppearance
+        appearanceObserver = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                self?.refreshStatusIcon()
+            }
+        }
 
         // 无箭头自绘面板（NSPopover 的箭头去不掉，改用无边框 NSPanel）
         let p = PanelWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 200),
@@ -739,6 +748,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 启动时：若有选中主机，自动连接
         store.autoConnectIfNeeded()
+    }
+
+    /// 刷新状态栏图标：转发计数标题 + 动态染色（前景色随深浅色、圆点随状态）
+    private func refreshStatusIcon() {
+        guard let store = Store.shared, let btn = statusItem?.button else { return }
+
+        // 转发计数标题
+        btn.title = store.onCount > 0 ? " \(store.onCount)" : ""
+
+        // 前景色（圆环/竖笔）：深色菜单栏用白、浅色用黑
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let ringColor: NSColor = isDark ? .white : .black
+
+        // 圆点聚合色：红（故障）> 绿（主机连通）> 灰（空闲）
+        let dot: NSColor
+        if let host = store.activeHost, store.hostState[host] == .failed {
+            dot = PmapColors.red
+        } else if !store.errors.isEmpty {
+            dot = PmapColors.red
+        } else if let host = store.activeHost, store.hostState[host] == .on {
+            dot = PmapColors.green
+        } else {
+            dot = PmapColors.idleGray
+        }
+
+        btn.image = pmapStatusBarIcon(ringColor: ringColor, dotColor: dot)
     }
 
     @objc private func togglePanel(_ sender: Any?) {
