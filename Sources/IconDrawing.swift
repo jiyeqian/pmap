@@ -31,21 +31,12 @@ enum PmapIconGeometry {
     static let rightStemYTop: CGFloat = 0.8730
 }
 
-/// 图标配色
+/// 图标配色（绿/红统一为系统色，与面板端口圆点、主机状态文字一致）
 enum PmapColors {
-    static let green = NSColor(hex: 0x89F94F)   // 圆点：正常/连通
-    static let red = NSColor(hex: 0xED230D)     // 圆点：故障
+    static let green = NSColor.systemGreen   // 圆点：正常/连通（#30D158）
+    static let red = NSColor.systemRed       // 圆点：故障（#FF4245）
     static let idleGray = NSColor(calibratedWhite: 0.55, alpha: 1) // 圆点：空闲/未连接
     static let bg = NSColor(calibratedRed: 0.17, green: 0.17, blue: 0.18, alpha: 1) // #2B2B2E
-}
-
-extension NSColor {
-    convenience init(hex: UInt32) {
-        self.init(calibratedRed: CGFloat((hex >> 16) & 0xFF) / 255,
-                  green: CGFloat((hex >> 8) & 0xFF) / 255,
-                  blue: CGFloat(hex & 0xFF) / 255,
-                  alpha: 1)
-    }
 }
 
 private func circleRect(cx: CGFloat, cy: CGFloat, r: CGFloat) -> NSRect {

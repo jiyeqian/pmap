@@ -810,7 +810,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if !store.errors.isEmpty {
             dot = PmapColors.red
         } else if let host = store.activeHost, store.hostState[host] == .on {
-            dot = PmapColors.green
+            dot = NSColor.systemGreen
         } else {
             dot = PmapColors.idleGray
         }
