@@ -1,32 +1,24 @@
 <div align="center">
-  <img src="docs/icon.png" width="120" alt="pmap 图标">
+  <img src="./docs/logo.svg" alt="pmap logo" width="180">
+
+  <h1>pmap</h1>
+
+<p>
+  <a href="https://github.com/jiyeqian/pmap/actions/workflows/release.yml"><img src="https://github.com/jiyeqian/pmap/actions/workflows/release.yml/badge.svg" alt="Release CI"></a>
+  <a href="https://github.com/jiyeqian/pmap/releases"><img src="https://img.shields.io/github/v/release/jiyeqian/pmap?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/jiyeqian/pmap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jiyeqian/pmap?style=flat-square" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/macOS-14.0%2B-black?style=flat-square&logo=apple" alt="macOS 14.0+">
+</p>
+<p>
+  <b><a href="https://github.com/jiyeqian/pmap/releases">下载</a></b> &nbsp;&middot;&nbsp;
+  <b><a href="https://github.com/jiyeqian/pmap/issues">问题反馈</a></b> &nbsp;&middot;&nbsp;
+  <b><a href="https://github.com/jiyeqian/pmap/blob/main/LICENSE">License</a></b>
+</p>
 </div>
-
-# pmap
-
-[![Release](https://github.com/jiyeqian/pmap/actions/workflows/release.yml/badge.svg)](https://github.com/jiyeqian/pmap/actions/workflows/release.yml)
 
 macOS 菜单栏端口映射（SSH 端口转发）管理器。用一个极简的弹出面板，点选主机、开关端口，秒级建立 / 断开本地到远程的端口转发，无需记忆 `ssh -L` 命令。
 
 > 基于 SSH ControlMaster 连接复用：首次连接后，之后的开 / 关端口都走同一条已建立的连接，几乎零延迟。
-
-## 特性
-
-- 菜单栏图标 + 极简下拉面板（无 Dock 图标，纯状态栏应用）
-- 主机通过下拉菜单选择，选中即连接；文字与颜色随状态切换（断开 / 连接中 / 连通 / 故障）
-- 端口一行一个，小圆点表示状态：**绿 = 通，灰 = 不通，红 = 故障**
-  - 单击端口：开启 / 关闭转发
-  - 单击行尾删除图标：删除端口（同时停掉该端口的映射服务）
-- 万能输入框：`port` 或 `port:port` 一键添加端口
-- 自动保存：端口列表、选中主机、端口开启状态全部持久化；重启后自动重连主机并恢复转发
-- 退出时自动断开全部映射；重启后恢复退出前的状态
-- **绝不修改 `~/.ssh/config`** —— 只读取，不写入
-
-## 系统要求
-
-- macOS 14.0 (Sonoma) 及以上（构建目标为 `macos14.0`；CI 的 `macos-26` runner 仅是编译环境，不影响最低系统要求）
-- Intel (x86_64) 与 Apple Silicon (arm64) 通用二进制
-- 本机的 `~/.ssh/config` 里需要有至少一个 Host 条目（主机的认证需已配置好，如密钥登录）
 
 ## 安装
 
@@ -69,6 +61,24 @@ xattr -cr /Applications/pmap.app
 ```
 
 放行一次后，之后打开不再有任何提示。
+
+## 特性
+
+- 菜单栏图标 + 极简下拉面板（无 Dock 图标，纯状态栏应用）
+- 主机通过下拉菜单选择，选中即连接；文字与颜色随状态切换（断开 / 连接中 / 连通 / 故障）
+- 端口一行一个，小圆点表示状态：**绿 = 通，灰 = 不通，红 = 故障**
+  - 单击端口：开启 / 关闭转发
+  - 单击行尾删除图标：删除端口（同时停掉该端口的映射服务）
+- 万能输入框：`port` 或 `port:port` 一键添加端口
+- 自动保存：端口列表、选中主机、端口开启状态全部持久化；重启后自动重连主机并恢复转发
+- 退出时自动断开全部映射；重启后恢复退出前的状态
+- **绝不修改 `~/.ssh/config`** —— 只读取，不写入
+
+## 系统要求
+
+- macOS 14.0 (Sonoma) 及以上（构建目标为 `macos14.0`；CI 的 `macos-26` runner 仅是编译环境，不影响最低系统要求）
+- Intel (x86_64) 与 Apple Silicon (arm64) 通用二进制
+- 本机的 `~/.ssh/config` 里需要有至少一个 Host 条目（主机的认证需已配置好，如密钥登录）
 
 ## 使用
 

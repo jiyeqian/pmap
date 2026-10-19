@@ -1,0 +1,12 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- pmap logo：与 AppIcon 同源（Sources/IconDrawing.swift 的 pmapAppIcon 几何）
+       概念：port:port 抽象为「p + 倒 p」绕中心 180° 旋转对称，共享圆环与圆点 -->
+  <rect x="32" y="32" width="448" height="448" rx="100" fill="#2B2B2E"/>
+  <!-- 左竖笔（p，向下）与右竖笔（倒 p，向上）：胶囊圆角矩形 -->
+  <rect x="96.1"  y="227.4" width="88" height="220" rx="44" fill="#FFFFFF"/>
+  <rect x="328.1" y="65.0"  width="88" height="220" rx="44" fill="#FFFFFF"/>
+  <!-- 圆环 -->
+  <circle cx="256.3" cy="255.9" r="160" fill="#FFFFFF"/>
+  <!-- 圆点（最上层，连通绿） -->
+  <circle cx="256" cy="256" r="128" fill="#89F94F"/>
+</svg>
