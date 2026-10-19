@@ -107,6 +107,8 @@ final class Store: ObservableObject {
     @Published var hostAliases: [String] = []
     private var heartbeatTask: Task<Void, Never>?       // 断线检测心跳（仅连接成功后运行）
     private var retryTask: Task<Void, Never>?           // 初次连接失败后的退避重试
+    private var portRetryTask: Task<Void, Never>?       // 端口转发失败后的退避重试
+    private var pendingRetry: Set<Int> = []             // 期望开启但失败、待重试的本地端口
 
     /// 面板上显示的主机 = ssh config 全集 - 已移除（不动 ~/.ssh/config）
     var hiddenHosts: Set<String> { Set(config.hiddenHosts ?? []) }
@@ -157,6 +159,8 @@ final class Store: ObservableObject {
     func shutdownAll() {
         stopHeartbeat()
         stopRetry()
+        stopPortRetry()
+        pendingRetry.removeAll()
         let ports = allRules.filter { active.contains($0.local) }
         let host = connHost ?? config.host
         active.removeAll()
@@ -168,6 +172,24 @@ final class Store: ObservableObject {
                 for r in ports { _ = Tunnel.cancel(host: host, r) }
                 Tunnel.shutdown(host: host)
             }
+        }
+    }
+
+    /// 退出前同步释放：逐个取消端口转发并断开主连接（同步阻塞，确保端口在进程退出前真正释放）
+    func releaseAllSync() {
+        stopHeartbeat()
+        stopRetry()
+        stopPortRetry()
+        pendingRetry.removeAll()
+        let ports = allRules.filter { active.contains($0.local) }
+        let host = connHost ?? config.host
+        active.removeAll()
+        errors.removeAll()
+        for h in hostState.keys { hostState[h] = .off }
+        activeHost = nil
+        if !host.isEmpty {
+            for r in ports { _ = Tunnel.cancel(host: host, r) }
+            Tunnel.shutdown(host: host)
         }
     }
 
@@ -207,8 +229,7 @@ final class Store: ObservableObject {
             hostState[alias] = .on
             // 恢复退出前已开启的端口转发
             for r in toRestore {
-                let fwdErr = await Task.detached { Tunnel.forward(host: alias, r) }.value
-                if fwdErr != nil { errors[r.local] = fwdErr } else { errors[r.local] = nil }
+                await self.attemptForward(host: alias, r)
             }
             self.startHeartbeat(host: alias)
         }
@@ -217,6 +238,8 @@ final class Store: ObservableObject {
     private func disconnectHost(_ alias: String) {
         stopHeartbeat()
         stopRetry()
+        stopPortRetry()
+        pendingRetry.removeAll()
         let ports = allRules.filter { active.contains($0.local) }
         active.removeAll()
         errors.removeAll()
@@ -258,8 +281,7 @@ final class Store: ObservableObject {
                     }
                     self.hostState[host] = .on
                     for r in toRestore {
-                        let fwdErr = await Task.detached { Tunnel.forward(host: host, r) }.value
-                        if fwdErr != nil { self.errors[r.local] = fwdErr } else { self.errors[r.local] = nil }
+                        await self.attemptForward(host: host, r)
                     }
                     // 重连成功：发通知
                     Notifier.post(title: "pmap 已重连",
@@ -295,8 +317,7 @@ final class Store: ObservableObject {
                 }
                 self.hostState[host] = .on
                 for r in toRestore {
-                    let fwdErr = await Task.detached { Tunnel.forward(host: host, r) }.value
-                    if fwdErr != nil { self.errors[r.local] = fwdErr } else { self.errors[r.local] = nil }
+                    await self.attemptForward(host: host, r)
                 }
                 Notifier.post(title: "pmap 已重连",
                               body: "主机 \(host) 连接已恢复，\(toRestore.count) 个端口转发已重建")
@@ -344,25 +365,38 @@ final class Store: ObservableObject {
         busy = true
         Task {
             defer { busy = false }
-            // 阻塞的 lsof / ssh 全部在后台线程跑，避免卡死 UI
-            let result = await Task.detached { () -> (busyBy: String?, fwdErr: String?) in
-                if let busyBy = Shell.portBusy(r.local) {
-                    return (busyBy, nil)
-                }
-                return (nil, Tunnel.forward(host: host, r))
-            }.value
-
-            if let busyBy = result.busyBy {
-                errors[r.local] = "本地 \(r.local) 被 \(busyBy) 占用"
-                return
-            }
-            if let e = result.fwdErr {
-                errors[r.local] = e
-            } else {
-                errors[r.local] = nil
-                active.insert(r.local)
-            }
+            _ = await attemptForward(host: host, r)
         }
+    }
+
+    /// 尝试建立端口转发：先检查本地端口占用（给出友好提示），失败自动入退避重试队列。
+    /// 返回是否转发成功。成功清错并 active.insert；失败写 errors 并 pendingRetry.insert + 启动重试。
+    @discardableResult
+    private func attemptForward(host: String, _ r: Rule) async -> Bool {
+        // 阻塞的 lsof / ssh 全部在后台线程跑，避免卡死 UI
+        let result = await Task.detached { () -> (busyBy: String?, fwdErr: String?) in
+            if let busyBy = Shell.portBusy(r.local) {
+                return (busyBy, nil)
+            }
+            return (nil, Tunnel.forward(host: host, r))
+        }.value
+
+        if let busyBy = result.busyBy {
+            errors[r.local] = "本地 \(r.local) 被 \(busyBy) 占用"
+            pendingRetry.insert(r.local)
+            startPortRetry()
+            return false
+        }
+        if let e = result.fwdErr {
+            errors[r.local] = e
+            pendingRetry.insert(r.local)
+            startPortRetry()
+            return false
+        }
+        errors[r.local] = nil
+        active.insert(r.local)
+        pendingRetry.remove(r.local)
+        return true
     }
 
     func close(_ r: Rule) {
@@ -373,7 +407,57 @@ final class Store: ObservableObject {
             await Task.detached { _ = Tunnel.cancel(host: host, r) }.value
             active.remove(r.local)
             errors[r.local] = nil
+            pendingRetry.remove(r.local)
+            if pendingRetry.isEmpty { stopPortRetry() }
         }
+    }
+
+    // MARK: 端口转发自动恢复
+
+    /// 启动端口退避重试：遍历失败端口，占用解除即自动恢复转发
+    private func startPortRetry() {
+        guard portRetryTask == nil else { return }
+        portRetryTask = Task { [weak self] in
+            var delay: UInt64 = 5_000_000_000   // 首次 5s，翻倍封顶 30s
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: delay)
+                if Task.isCancelled { break }
+                guard let self, self.connHost != nil else { break }
+                guard !self.pendingRetry.isEmpty else { break }
+
+                let host = self.connHost!
+                // 本轮要重试的端口快照
+                let targets = self.pendingRetry.compactMap { local in
+                    self.allRules.first { $0.local == local }
+                }
+
+                var recovered = 0
+                var anyFailed = false
+                for rule in targets {
+                    if Task.isCancelled { break }
+                    if await self.attemptForward(host: host, rule) {
+                        recovered += 1
+                    } else {
+                        anyFailed = true
+                    }
+                }
+
+                if recovered > 0 {
+                    Notifier.post(title: "pmap 端口已恢复",
+                                  body: "\(recovered) 个端口转发已自动恢复")
+                }
+                if self.pendingRetry.isEmpty { break }
+                if anyFailed {
+                    delay = min(delay * 2, 30_000_000_000)   // 退避封顶 30s
+                }
+            }
+            self?.portRetryTask = nil
+        }
+    }
+
+    private func stopPortRetry() {
+        portRetryTask?.cancel()
+        portRetryTask = nil
     }
 
     func commitQuick() {
@@ -719,6 +803,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var countObserver: AnyCancellable?
     private var appearanceObserver: NSKeyValueObservation?
     private var eventMonitors: [Any] = []
+    private var carouselTimer: Timer?        // 状态栏圆点轮播计时器
+    private var carouselIndex: Int = 0
+    private var carouselColors: [NSColor] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let store = Store.shared else { return }
@@ -795,27 +882,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.autoConnectIfNeeded()
     }
 
-    /// 刷新状态栏图标：动态染色（前景色随深浅色、圆点随状态）
+    /// 刷新状态栏图标：动态染色 + 圆点轮播（前景色随深浅色，圆点按已开启端口状态色轮流显示）
     private func refreshStatusIcon() {
-        guard let store = Store.shared, let btn = statusItem?.button else { return }
+        guard let store = Store.shared else { return }
 
         // 前景色（圆环/竖笔）：深色菜单栏用白、浅色用黑
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let ringColor: NSColor = isDark ? .white : .black
 
-        // 圆点聚合色：红（故障）> 绿（主机连通）> 灰（空闲）
-        let dot: NSColor
-        if let host = store.activeHost, store.hostState[host] == .failed {
-            dot = PmapColors.red
-        } else if !store.errors.isEmpty {
-            dot = PmapColors.red
-        } else if let host = store.activeHost, store.hostState[host] == .on {
-            dot = NSColor.systemGreen
-        } else {
-            dot = PmapColors.idleGray
+        // 轮播序列：已开启端口（按 allRules 顺序）→ 状态色（红=故障、绿=正常）；未开启端口不参与
+        let newColors: [NSColor] = store.allRules
+            .filter { store.active.contains($0.local) }
+            .map { store.errors[$0.local] != nil ? PmapColors.red : PmapColors.green }
+
+        // 序列变化则重置轮播索引（数量或内容不同）
+        if newColors.count != carouselColors.count
+            || zip(newColors, carouselColors).contains(where: { $0 != $1 }) {
+            carouselIndex = 0
+        }
+        carouselColors = newColors
+
+        // 空序列（无开启端口 / 主机未连接）→ 灰点，停表
+        if newColors.isEmpty {
+            carouselTimer?.invalidate()
+            carouselTimer = nil
+            applyStatusIcon(ringColor: ringColor, dotColor: PmapColors.idleGray)
+            return
         }
 
-        btn.image = pmapStatusBarIcon(ringColor: ringColor, dotColor: dot)
+        // 非空：立即显示当前时隙，并启动/复用 1.5s 轮播计时器
+        applyStatusIcon(ringColor: ringColor, dotColor: newColors[carouselIndex])
+        if carouselTimer == nil {
+            carouselTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    guard !self.carouselColors.isEmpty else { return }
+                    self.carouselIndex = (self.carouselIndex + 1) % self.carouselColors.count
+                    self.applyStatusIcon(ringColor: self.currentRingColor(),
+                                         dotColor: self.carouselColors[self.carouselIndex])
+                }
+            }
+        }
+    }
+
+    /// 仅按给定颜色设置状态栏图标位图（不改变轮播状态）
+    private func applyStatusIcon(ringColor: NSColor, dotColor: NSColor) {
+        statusItem?.button?.image = pmapStatusBarIcon(ringColor: ringColor, dotColor: dotColor)
+    }
+
+    /// 当前深浅色对应的前景色
+    private func currentRingColor() -> NSColor {
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark ? .white : .black
     }
 
     @objc private func togglePanel(_ sender: Any?) {
@@ -846,11 +964,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Store.shared?.save()
     }
 
-    /// 退出前：断开全部映射并保存状态（端口开启状态已先保存，重启可恢复）
-    func applicationWillTerminate(_ notification: Notification) {
-        guard let store = Store.shared else { return }
+    /// 退出前：同步释放端口与主连接，确保进程退出前端口真正释放
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        carouselTimer?.invalidate()
+        guard let store = Store.shared else { return .terminateNow }
         store.save()          // 先保存端口开启状态，便于重启恢复
-        store.shutdownAll()   // 再断开全部映射与主机连接
+        store.releaseAllSync() // 同步取消端口转发并断开主连接（阻塞到完成）
+        return .terminateNow
+    }
+
+    /// 退出兜底：若 applicationShouldTerminate 未被触发（如系统强制退出），做最小清理
+    func applicationWillTerminate(_ notification: Notification) {
+        carouselTimer?.invalidate()
     }
 }
 
