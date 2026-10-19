@@ -173,7 +173,8 @@ final class Store: ObservableObject {
 
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
 
-    func isOn(_ r: Rule) -> Bool { active.contains(r.local) }
+    /// 端口是否「实际转发中」：既在期望集合中，且当前主机处于连通状态
+    func isForwarding(_ r: Rule) -> Bool { active.contains(r.local) && connHost != nil }
     func error(_ r: Rule) -> String? { errors[r.local] }
 
     var onCount: Int { allRules.filter { active.contains($0.local) }.count }
@@ -513,7 +514,7 @@ struct MenuPanel: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(store.allRules) { r in
-                        Chip(rule: r, on: store.isOn(r), err: store.error(r),
+                        Chip(rule: r, on: store.isForwarding(r), err: store.error(r),
                              action: { store.toggle(r) },
                              remove: { store.removeRuleAnywhere(r) })
                     }
