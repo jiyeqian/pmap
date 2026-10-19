@@ -555,6 +555,10 @@ struct MenuPanel: View {
     /// 主机下拉框：标题显示当前状态文字（断开/连接中…/连通/故障），选中即连接
     private var hostMenu: some View {
         Menu {
+            // 未读到 ~/.ssh/config 或无可用主机时给出提示
+            if store.visibleHosts.isEmpty {
+                Text("未在 ~/.ssh/config 中找到可用主机")
+            }
             ForEach(store.visibleHosts, id: \.self) { alias in
                 Button {
                     store.selectHost(alias)
@@ -568,7 +572,7 @@ struct MenuPanel: View {
             }
         } label: {
             HStack(spacing: 6) {
-                Text(store.activeHost ?? "选择主机")
+                Text(store.visibleHosts.isEmpty ? "无可用主机" : (store.activeHost ?? "选择主机"))
                     .font(.system(size: 12))
                     .foregroundStyle(hostStatusColor)
                     .lineLimit(1)
@@ -750,12 +754,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.autoConnectIfNeeded()
     }
 
-    /// 刷新状态栏图标：转发计数标题 + 动态染色（前景色随深浅色、圆点随状态）
+    /// 刷新状态栏图标：动态染色（前景色随深浅色、圆点随状态）
     private func refreshStatusIcon() {
         guard let store = Store.shared, let btn = statusItem?.button else { return }
-
-        // 转发计数标题
-        btn.title = store.onCount > 0 ? " \(store.onCount)" : ""
 
         // 前景色（圆环/竖笔）：深色菜单栏用白、浅色用黑
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

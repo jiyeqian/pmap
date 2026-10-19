@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="docs/icon.png" width="120" alt="pmap 图标">
+</div>
+
 # pmap
 
 [![Release](https://github.com/jiyeqian/pmap/actions/workflows/release.yml/badge.svg)](https://github.com/jiyeqian/pmap/actions/workflows/release.yml)
@@ -20,7 +24,7 @@ macOS 菜单栏端口映射（SSH 端口转发）管理器。用一个极简的�
 
 ## 系统要求
 
-- macOS 14.0 (Sonoma) 及以上
+- macOS 14.0 (Sonoma) 及以上（构建目标为 `macos14.0`；CI 的 `macos-26` runner 仅是编译环境，不影响最低系统要求）
 - Intel (x86_64) 与 Apple Silicon (arm64) 通用二进制
 - 本机的 `~/.ssh/config` 里需要有至少一个 Host 条目（主机的认证需已配置好，如密钥登录）
 
