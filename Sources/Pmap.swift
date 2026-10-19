@@ -105,7 +105,8 @@ final class Store: ObservableObject {
     @Published var inputInvalid: String? = nil          // 万能输入错误提示（非空则输入框红显）
 
     @Published var hostAliases: [String] = []
-    private var heartbeatTask: Task<Void, Never>?       // 断线检测心跳
+    private var heartbeatTask: Task<Void, Never>?       // 断线检测心跳（仅连接成功后运行）
+    private var retryTask: Task<Void, Never>?           // 初次连接失败后的退避重试
 
     /// 面板上显示的主机 = ssh config 全集 - 已移除（不动 ~/.ssh/config）
     var hiddenHosts: Set<String> { Set(config.hiddenHosts ?? []) }
@@ -155,6 +156,7 @@ final class Store: ObservableObject {
     /// 退出前：断开全部端口映射 + 断开主机
     func shutdownAll() {
         stopHeartbeat()
+        stopRetry()
         let ports = allRules.filter { active.contains($0.local) }
         let host = connHost ?? config.host
         active.removeAll()
@@ -186,6 +188,7 @@ final class Store: ObservableObject {
 
     private func connectHost(_ alias: String, restorePorts: Bool = false) {
         stopHeartbeat()
+        stopRetry()
         hostState[alias] = .connecting
         activeHost = alias
         config.host = alias
@@ -196,6 +199,8 @@ final class Store: ObservableObject {
             let e = await Task.detached { Tunnel.ensureConnection(host: alias) }.value
             if e != nil {
                 hostState[alias] = .failed
+                // 初次连接失败：进入退避重试（网络就绪后自动恢复）
+                self.startRetry(host: alias, toRestore: toRestore)
                 return
             }
             hostState[alias] = .on
@@ -210,6 +215,7 @@ final class Store: ObservableObject {
 
     private func disconnectHost(_ alias: String) {
         stopHeartbeat()
+        stopRetry()
         let ports = allRules.filter { active.contains($0.local) }
         active.removeAll()
         errors.removeAll()
@@ -268,6 +274,40 @@ final class Store: ObservableObject {
     private func stopHeartbeat() {
         heartbeatTask?.cancel()
         heartbeatTask = nil
+    }
+
+    /// 初次连接失败后的退避重试：间隔 3s → 6s → 12s → 30s 封顶，成功即转交心跳
+    private func startRetry(host: String, toRestore: [Rule]) {
+        retryTask?.cancel()
+        retryTask = Task { [weak self] in
+            var delay: UInt64 = 3_000_000_000   // 首次 3 秒
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: delay)
+                if Task.isCancelled { break }
+                guard let self else { break }
+                // 状态已不是「失败」（用户切换主机/手动断开）则停止重试
+                guard self.hostState[host] == .failed else { break }
+                let err = await Task.detached { Tunnel.ensureConnection(host: host) }.value
+                if err != nil {
+                    delay = min(delay * 2, 30_000_000_000)   // 退避，封顶 30s
+                    continue
+                }
+                self.hostState[host] = .on
+                for r in toRestore {
+                    let fwdErr = await Task.detached { Tunnel.forward(host: host, r) }.value
+                    if fwdErr != nil { self.errors[r.local] = fwdErr } else { self.errors[r.local] = nil }
+                }
+                Notifier.post(title: "pmap 已重连",
+                              body: "主机 \(host) 连接已恢复，\(toRestore.count) 个端口转发已重建")
+                self.startHeartbeat(host: host)
+                break
+            }
+        }
+    }
+
+    private func stopRetry() {
+        retryTask?.cancel()
+        retryTask = nil
     }
 
     /// 下拉选中主机：选中即连接（已连接则保持）
