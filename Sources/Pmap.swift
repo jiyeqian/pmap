@@ -528,6 +528,21 @@ extension View {
     func rowHover() -> some View { modifier(RowHover()) }
 }
 
+/// 轻量 hover 反馈：悬停时加深（用 opacity 而非 foregroundStyle，
+/// 避免与子视图 Text 自身的 foregroundStyle 冲突）
+struct HoverText: ViewModifier {
+    @State private var hovering = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(hovering ? 1.0 : 0.6)
+            .onHover { hovering = $0 }
+    }
+}
+
+extension View {
+    func hoverText() -> some View { modifier(HoverText()) }
+}
+
 /// 端口行：小圆点（三色状态）+ 端口文字（单色）+ 右侧删除图标
 struct Chip: View {
     let rule: Rule
@@ -636,43 +651,44 @@ struct MenuPanel: View {
 
             Divider()
 
-            // 倒数第二项：pmap 版本（点击打开 GitHub）
-            Button {
-                if let url = URL(string: "https://github.com/jiyeqian/pmap") {
-                    NSWorkspace.shared.open(url)
+            // 底部栏：左=版本号（点击打开项目主页）｜中=预留中英切换｜右=退出
+            HStack(spacing: 6) {
+                // 左：版本号（appVersion 已带 v 前缀）
+                Button {
+                    if let url = URL(string: "https://github.com/jiyeqian/pmap") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Text(appVersion)
+                        .font(.system(size: 11, design: .monospaced))
                 }
-            } label: {
-                HStack {
-                    Text("pmap \(appVersion)")
-                        .font(.system(size: 11))
-                    Spacer()
-                }
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .rowHover()
+                .buttonStyle(.plain)
+                .hoverText()
+                .help("打开项目主页")
 
-            Divider()
+                Spacer(minLength: 0)
 
-            // 最后一项：退出；底部留白更大
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                HStack {
+                // 中：预留中英语切换（后续 i18n 落地时原地替换为切换控件）
+                Text("中 / EN")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.quaternary)
+
+                Spacer(minLength: 0)
+
+                // 右：退出
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
                     Text("Quit")
                         .font(.system(size: 11))
-                    Spacer()
-                    Text("⌘Q")
-                        .font(.system(size: 11)).foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 7)
-                .padding(.bottom, 13)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .hoverText()
+                .help("退出 pmap")
             }
-            .buttonStyle(.plain)
-            .rowHover()
+            .padding(.horizontal, 12)
+            .padding(.top, 7)
+            .padding(.bottom, 13)
         }
         .frame(width: 180)
     }
