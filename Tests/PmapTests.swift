@@ -130,10 +130,10 @@ struct ParseHostsTests {
         #expect(SSHConfig.parseHosts(text) == ["good"])
     }
 
-    @Test("跳过含点地址")
+    @Test("显示含点地址")
     func skipDotted() {
         let text = "Host github.com\nHost plain\n"
-        #expect(SSHConfig.parseHosts(text) == ["plain"])
+        #expect(SSHConfig.parseHosts(text) == ["github.com", "plain"])
     }
 
     @Test("跳过本机别名（selfAliases）")

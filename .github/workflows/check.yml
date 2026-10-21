@@ -1,0 +1,25 @@
+name: Checks
+on:
+  push:
+    branches: ['main', 'codex/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test-and-build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit and lifecycle tests
+        run: ./test.sh
+      - name: Build universal application
+        run: ./build.sh
+      - name: Validate bundle
+        run: ./scripts/verify-bundle.sh pmap.app
+      - name: Build sandbox candidate with Xcode
+        run: |
+          xcodebuild -project Pmap.xcodeproj -scheme pmap -configuration Debug \
+            -derivedDataPath .build-store -destination 'generic/platform=macOS' \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM='' \
+            ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO build
+          PMAP_REQUIRE_SANDBOX=1 ./scripts/verify-bundle.sh .build-store/Build/Products/Debug/pmap.app

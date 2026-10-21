@@ -6,7 +6,7 @@
 
 import Foundation
 
-enum PortError: Equatable {
+enum PortError: Equatable, Sendable {
     /// 本地端口被占用（by = 占用进程名，nil 表示未知进程）
     case localPortBusy(port: Int, by: String?)
     /// 服务端禁止端口转发（sshd 关闭 AllowTcpForwarding）

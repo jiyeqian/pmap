@@ -1,0 +1,62 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+5B2283D673FBB9CEDDBCB114 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Configuration.swift"; sourceTree = SOURCE_ROOT; };
+A02C3C941AD0F6BE22C5C084 = { isa = PBXBuildFile; fileRef = 5B2283D673FBB9CEDDBCB114; };
+F132596F79AA603C8506B8F9 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/I18n.swift"; sourceTree = SOURCE_ROOT; };
+B3E1AB3B969A8F5B98B74F7D = { isa = PBXBuildFile; fileRef = F132596F79AA603C8506B8F9; };
+A767F2A99836433A1AFC6EE2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/IconDrawing.swift"; sourceTree = SOURCE_ROOT; };
+2230C298D64FB7A36220BE92 = { isa = PBXBuildFile; fileRef = A767F2A99836433A1AFC6EE2; };
+032BAB91AD17182055EEAFE3 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Model.swift"; sourceTree = SOURCE_ROOT; };
+BD911B9D97685AD779CC2F7D = { isa = PBXBuildFile; fileRef = 032BAB91AD17182055EEAFE3; };
+E85F398E7999725AFA22A666 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Notifier.swift"; sourceTree = SOURCE_ROOT; };
+E372AB0F563114345799FB69 = { isa = PBXBuildFile; fileRef = E85F398E7999725AFA22A666; };
+AF4109C566B002664CB275B1 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Parsing.swift"; sourceTree = SOURCE_ROOT; };
+2C45FC7553D6C77F07B89F8F = { isa = PBXBuildFile; fileRef = AF4109C566B002664CB275B1; };
+4483F5A427CD333E96242C13 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Pmap.swift"; sourceTree = SOURCE_ROOT; };
+32613CA19E6ADA1015D6F1C3 = { isa = PBXBuildFile; fileRef = 4483F5A427CD333E96242C13; };
+9C8E7FB69EC724B9EA3A0D14 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/PortError.swift"; sourceTree = SOURCE_ROOT; };
+A3CEE2577B1993A4829AA89D = { isa = PBXBuildFile; fileRef = 9C8E7FB69EC724B9EA3A0D14; };
+8F97487C0C52B6FEBC9AA2DA = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/SSHConfig.swift"; sourceTree = SOURCE_ROOT; };
+E78E047B203ACC3CB09E4ACB = { isa = PBXBuildFile; fileRef = 8F97487C0C52B6FEBC9AA2DA; };
+ABB458182C0C2490E7CA5DE6 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/SettingsView.swift"; sourceTree = SOURCE_ROOT; };
+CA6DB8D1CF2DFC70843AE126 = { isa = PBXBuildFile; fileRef = ABB458182C0C2490E7CA5DE6; };
+DBBE6533041B8FD0CB5AFAC8 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Shell.swift"; sourceTree = SOURCE_ROOT; };
+E1D66EBF9354318E6B22EE2A = { isa = PBXBuildFile; fileRef = DBBE6533041B8FD0CB5AFAC8; };
+409FF40BCFC1F14473F9666F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Store.swift"; sourceTree = SOURCE_ROOT; };
+C4CCFB55434616609FAF0AA9 = { isa = PBXBuildFile; fileRef = 409FF40BCFC1F14473F9666F; };
+457C893391B8C613E647F77A = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Tunnel.swift"; sourceTree = SOURCE_ROOT; };
+A7DAAA2A2F3B0B1CC0956272 = { isa = PBXBuildFile; fileRef = 457C893391B8C613E647F77A; };
+8855A872B88E5128FFD5A7AE = { isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "docs/PRIVACY.md"; sourceTree = SOURCE_ROOT; };
+C155C54EBFFA595709223C53 = { isa = PBXBuildFile; fileRef = 8855A872B88E5128FFD5A7AE; };
+B7F035F0F74B73AC29B23B47 = { isa = PBXFileReference; lastKnownFileType = image.icns; path = ".build/icon/AppIcon.icns"; sourceTree = SOURCE_ROOT; };
+098B733DF6FF9B81508011AA = { isa = PBXBuildFile; fileRef = B7F035F0F74B73AC29B23B47; };
+38A007151ABE87CC01A5B6E9 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = pmap.app; sourceTree = BUILT_PRODUCTS_DIR; };
+64292B1C2B2E13EAD8788FC8 = { isa = PBXGroup; children = (5B2283D673FBB9CEDDBCB114,F132596F79AA603C8506B8F9,A767F2A99836433A1AFC6EE2,032BAB91AD17182055EEAFE3,E85F398E7999725AFA22A666,AF4109C566B002664CB275B1,4483F5A427CD333E96242C13,9C8E7FB69EC724B9EA3A0D14,8F97487C0C52B6FEBC9AA2DA,ABB458182C0C2490E7CA5DE6,DBBE6533041B8FD0CB5AFAC8,409FF40BCFC1F14473F9666F,457C893391B8C613E647F77A,8855A872B88E5128FFD5A7AE,B7F035F0F74B73AC29B23B47,FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
+FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (38A007151ABE87CC01A5B6E9); name = Products; sourceTree = "<group>"; };
+BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A02C3C941AD0F6BE22C5C084,B3E1AB3B969A8F5B98B74F7D,2230C298D64FB7A36220BE92,BD911B9D97685AD779CC2F7D,E372AB0F563114345799FB69,2C45FC7553D6C77F07B89F8F,32613CA19E6ADA1015D6F1C3,A3CEE2577B1993A4829AA89D,E78E047B203ACC3CB09E4ACB,CA6DB8D1CF2DFC70843AE126,E1D66EBF9354318E6B22EE2A,C4CCFB55434616609FAF0AA9,A7DAAA2A2F3B0B1CC0956272); runOnlyForDeploymentPostprocessing = 0; };
+0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (C155C54EBFFA595709223C53,098B733DF6FF9B81508011AA); runOnlyForDeploymentPostprocessing = 0; };
+7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+89E1FD6268CC0F221A2BE178 = { isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; }; name = Debug; };
+7082CC0B6FC1282FCEABD07A = { isa = XCBuildConfiguration; name = Debug; buildSettings = {
+PRODUCT_NAME = pmap; PRODUCT_BUNDLE_IDENTIFIER = dev.local.pmap.sandbox;
+INFOPLIST_FILE = Resources/Info.plist; GENERATE_INFOPLIST_FILE = NO;
+MARKETING_VERSION = 0.2.0; CURRENT_PROJECT_VERSION = 1;
+CODE_SIGN_ENTITLEMENTS = Config/Pmap.entitlements; CODE_SIGN_STYLE = Automatic;
+ENABLE_HARDENED_RUNTIME = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) PMAP_SANDBOX";
+SWIFT_OPTIMIZATION_LEVEL = "-Onone"; COMBINE_HIDPI_IMAGES = YES;
+}; };
+E6DE6C99132752C914FEF632 = { isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; }; name = Release; };
+639A7CA24D39909E713B47F7 = { isa = XCBuildConfiguration; name = Release; buildSettings = {
+PRODUCT_NAME = pmap; PRODUCT_BUNDLE_IDENTIFIER = dev.local.pmap.sandbox;
+INFOPLIST_FILE = Resources/Info.plist; GENERATE_INFOPLIST_FILE = NO;
+MARKETING_VERSION = 0.2.0; CURRENT_PROJECT_VERSION = 1;
+CODE_SIGN_ENTITLEMENTS = Config/Pmap.entitlements; CODE_SIGN_STYLE = Automatic;
+ENABLE_HARDENED_RUNTIME = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) PMAP_SANDBOX";
+SWIFT_OPTIMIZATION_LEVEL = "-O"; COMBINE_HIDPI_IMAGES = YES;
+}; };
+862894B703A6DEDF96A9DD6C = { isa = XCConfigurationList; buildConfigurations = (89E1FD6268CC0F221A2BE178,E6DE6C99132752C914FEF632); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+C57128001CE614BF8549D6BB = { isa = XCConfigurationList; buildConfigurations = (7082CC0B6FC1282FCEABD07A,639A7CA24D39909E713B47F7); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+0E8A3AD980EC179856012B7E = { isa = PBXNativeTarget; buildConfigurationList = C57128001CE614BF8549D6BB; buildPhases = (28389C355C7EC50603BF335D,BCE16DD0260827ECF338C787,7561BFB015D8F536760CB671,0189424A5A60FED329FA868E); buildRules = (); dependencies = (); name = pmap; productName = pmap; productReference = 38A007151ABE87CC01A5B6E9; productType = "com.apple.product-type.application"; };
+98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { LastUpgradeCheck = 2600; }; buildConfigurationList = 862894B703A6DEDF96A9DD6C; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,"zh-Hans",Base); mainGroup = 64292B1C2B2E13EAD8788FC8; productRefGroup = FBDC4F23F93125BBEEAE800C; projectDirPath = ""; projectRoot = ""; targets = (0E8A3AD980EC179856012B7E); };
+28389C355C7EC50603BF335D = { isa = PBXShellScriptBuildPhase; buildActionMask = 2147483647; files = (); inputPaths = ("$(SRCROOT)/Sources/IconDrawing.swift", "$(SRCROOT)/make_icon.sh"); outputPaths = ("$(SRCROOT)/.build/icon/AppIcon.icns"); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/bash; shellScript = "\"$SRCROOT/make_icon.sh\"\n"; name = "Generate App Icon"; };
+}; rootObject = 98F54143AB4E86B28C3AFEE0; }

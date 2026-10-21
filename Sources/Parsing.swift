@@ -33,7 +33,7 @@ func parseQuickInput(_ s: String) -> (rule: Rule, group: String?)? {
     }
     guard !portPart.isEmpty, !portPart.contains(" ") else { return nil }
     if portPart.contains(":") {
-        let p = portPart.split(separator: ":").map(String.init)
+        let p = portPart.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
         guard p.count == 2, let l = Int(p[0]), let r = Int(p[1]), isValidPort(l), isValidPort(r) else { return nil }
         return (Rule(local: l, remote: r, note: note), group)
     }

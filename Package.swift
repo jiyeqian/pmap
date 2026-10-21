@@ -3,13 +3,14 @@ import PackageDescription
 
 let package = Package(
     name: "pmap",
+    platforms: [.macOS(.v14)],
     targets: [
-        // 纯逻辑核心（无 UI/无 @main），供单元测试引用
-        // 排除 Pmap.swift（含 @main 入口 + SwiftUI/AppKit 依赖，由 build.sh 单独编译）
+        // 可测试核心（不含应用入口与设置视图），供单元测试引用
+        // 应用入口与设置视图由 build.sh / Xcode 编译
         .target(
             name: "PmapCore",
             path: "Sources",
-            exclude: ["Pmap.swift"]
+            exclude: ["Pmap.swift", "SettingsView.swift"]
         ),
         .testTarget(
             name: "PmapCoreTests",

@@ -1,89 +1,101 @@
-// SSHConfig.swift
-// 解析 ~/.ssh/config 与 ssh -G 展开结果
-
 import Foundation
-
-// MARK: - SSH 配置解析
+import Darwin
 
 enum SSHConfig {
-    static func listHosts() -> [String] {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let path = home + "/.ssh/config"
-        return parseHosts((try? String(contentsOfFile: path, encoding: .utf8)) ?? "", selfAliases: localAliases())
+    static func isSafeAlias(_ name: String) -> Bool {
+        !name.isEmpty && !name.hasPrefix("-") && !name.contains(where: { $0.isWhitespace || $0.isNewline || "/*?!%\\\"'".contains($0) })
     }
 
-    /// 解析 ssh_config 文本，收集所有具体主机别名
-    /// - 跳过通配符（`*` `?` `!`）与含点的地址
-    /// - 跳过会在 `ssh -G` 里解析成自身的条目
+    /// Lex ssh_config tokens without executing Match exec or shell substitutions.
+    static func tokens(_ line: String) -> [String] {
+        var result: [String] = []
+        var word = ""
+        var quote: Character?
+        var escaped = false
+        for char in line {
+            if escaped { word.append(char); escaped = false; continue }
+            if char == "\\" { escaped = true; continue }
+            if let current = quote {
+                if char == current { quote = nil } else { word.append(char) }
+            } else if char == "\"" || char == "'" { quote = char }
+            else if char == "#" { break }
+            else if char.isWhitespace || (char == "=" && (result.isEmpty || (result.count == 1 && word.isEmpty))) {
+                if !word.isEmpty { result.append(word); word = "" }
+            } else { word.append(char) }
+        }
+        if !word.isEmpty { result.append(word) }
+        return result
+    }
+
     static func parseHosts(_ text: String, selfAliases: Set<String> = []) -> [String] {
-        var hosts: [String] = []
-        for raw in text.components(separatedBy: .newlines) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
+        var result: [String] = []
+        for line in text.components(separatedBy: .newlines) {
+            let parts = tokens(line)
+            guard parts.first?.lowercased() == "host" else { continue }
+            // Keep comma-separated aliases accepted by older pmap versions.
+            for name in parts.dropFirst().flatMap({ $0.split(separator: ",").map(String.init) }) {
+                if isSafeAlias(name), !selfAliases.contains(name), !result.contains(name) { result.append(name) }
+            }
+        }
+        return result
+    }
 
-            // Host / HostName / HostKeyAlias 都可能是 "host" 开头，按空白切分后精确比对
-            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            guard let key = parts.first?.lowercased(), key == "host" else { continue }
-            guard parts.count > 1 else { continue }
-
-            for token in parts.dropFirst() {
-                // ssh_config 允许 `Host a b c` 一行多个别名，也允许逗号分隔
-                for rawName in token.split(separator: ",").map(String.init) {
-                    let name = rawName.trimmingCharacters(in: .whitespaces)
-                    guard !name.isEmpty else { continue }
-                    // 通配、否定、含点（多为直接写地址）
-                    if name.contains(where: { "*?!".contains($0) }) { continue }
-                    if name.contains(".") { continue }
-                    if selfAliases.contains(name) { continue }
-                    if !hosts.contains(name) { hosts.append(name) }
+    static func readHosts(at file: URL) throws -> [String] {
+        var visited: Set<String> = []
+        var result: [String] = []
+        func read(_ url: URL, depth: Int) throws {
+            guard depth < 16, visited.count < 256 else { throw CocoaError(.fileReadTooLarge) }
+            let path = url.standardizedFileURL.path
+            guard visited.insert(path).inserted else { return }
+            let attributes = try FileManager.default.attributesOfItem(atPath: path)
+            guard (attributes[.size] as? NSNumber)?.intValue ?? 0 < 1_048_576 else { throw CocoaError(.fileReadTooLarge) }
+            let text = try String(contentsOfFile: path, encoding: .utf8)
+            for line in text.components(separatedBy: .newlines) {
+                let parts = tokens(line)
+                guard let key = parts.first?.lowercased() else { continue }
+                if key == "host" {
+                    for name in parseHosts(line) where !result.contains(name) { result.append(name) }
+                } else if key == "include" {
+                    for pattern in parts.dropFirst() {
+                        let expanded = pattern.hasPrefix("~/") ? AppPaths.sshHome.path + String(pattern.dropFirst()) : pattern
+                        let absolute = expanded.hasPrefix("/") ? expanded : AppPaths.sshHome.appendingPathComponent(".ssh/" + expanded).path
+                        var matches = glob_t()
+                        let status = glob(absolute, 0, nil, &matches)
+                        defer { globfree(&matches) }
+                        if status == GLOB_NOMATCH { continue }
+                        guard status == 0 else { throw CocoaError(.fileReadUnknown) }
+                        if let paths = matches.gl_pathv {
+                            for index in 0..<Int(matches.gl_pathc) {
+                                if let entry = paths[index] { try read(URL(fileURLWithPath: String(cString: entry)), depth: depth + 1) }
+                            }
+                        }
+                    }
                 }
             }
         }
-        return hosts
+        try read(file, depth: 0)
+        return result
     }
 
-    /// 跳过指向本机的条目（通常没人想给自己开隧道）
-    private static func localAliases() -> Set<String> {
-        var out: Set<String> = []
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let path = home + "/.ssh/config"
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return out }
-
-        var current: String?
-        for raw in text.components(separatedBy: .newlines) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            guard parts.count > 1 else { continue }
-            switch parts[0].lowercased() {
-            case "host":
-                current = parts[1]
-            case "hostname":
-                let h = parts[1].lowercased()
-                if h == "localhost" || h == "127.0.0.1" || h == "::1" { if let c = current { out.insert(c) } }
-            default: break
-            }
-        }
-        return out
+    static func listHosts() -> [String] {
+        (try? readHosts(at: AppPaths.sshHome.appendingPathComponent(".ssh/config"))) ?? []
     }
 
-    /// 用 ssh -G 展开别名，得到最终生效的连接参数
     static func resolve(_ alias: String) -> SSHTarget? {
-        guard let out = Shell.run("/usr/bin/ssh", ["-G", alias]) else { return nil }
-        var t = SSHTarget(alias: alias)
+        guard isSafeAlias(alias), let out = Shell.run("/usr/bin/ssh", ["-G", "-o", "PermitLocalCommand=no", "--", alias]) else { return nil }
+        var target = SSHTarget(alias: alias)
         for line in out.components(separatedBy: .newlines) {
             let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
             switch parts[0] {
-            case "user": t.user = parts[1]
-            case "hostname": t.hostname = parts[1]
-            case "port": t.port = Int(parts[1]) ?? 22
-            case "proxyjump": t.proxyJump = parts[1]
-            case "identityfile": if t.identityFile.isEmpty { t.identityFile = parts[1] }
+            case "user": target.user = parts[1]
+            case "hostname": target.hostname = parts[1]
+            case "port": target.port = Int(parts[1]) ?? 22
+            case "proxyjump": target.proxyJump = parts[1]
+            case "identityfile": if target.identityFile.isEmpty { target.identityFile = parts[1] }
             default: break
             }
         }
-        guard !t.hostname.isEmpty else { return nil }
-        return t
+        return target.hostname.isEmpty ? nil : target
     }
 }

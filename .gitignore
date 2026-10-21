@@ -15,3 +15,7 @@ config.json
 
 # CodeBuddy 本地数据
 .codebuddy/
+
+pmap-sandbox.app/
+.build-store/
+pmap-probe.app/

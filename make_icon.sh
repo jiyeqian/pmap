@@ -4,6 +4,9 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+mkdir -p .build/module-cache
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$PWD/.build/module-cache}"
 
 OUT_DIR=".build/icon"
 mkdir -p "$OUT_DIR/AppIcon.iconset"
@@ -27,7 +30,7 @@ struct DrawIcon {
 }
 EOF
 
-xcrun swiftc -O "$SCRIPT_DIR/Sources/IconDrawing.swift" "$OUT_DIR/draw.swift" -o "$OUT_DIR/draw" 2>/dev/null
+xcrun swiftc -parse-as-library -O "$SCRIPT_DIR/Sources/IconDrawing.swift" "$OUT_DIR/draw.swift" -o "$OUT_DIR/draw"
 "$OUT_DIR/draw" "$OUT_DIR/icon_1024.png"
 
 # 生成 iconset 各尺寸
@@ -37,6 +40,4 @@ for spec in "16 icon_16x16" "32 icon_16x16@2x" "32 icon_32x32" "64 icon_32x32@2x
   sips -z $sz $sz icon_1024.png --out "AppIcon.iconset/${name}.png" >/dev/null 2>&1
 done
 iconutil -c icns AppIcon.iconset -o AppIcon.icns
-mkdir -p "$SCRIPT_DIR/pmap.app/Contents/Resources"
-cp AppIcon.icns "$SCRIPT_DIR/pmap.app/Contents/Resources/AppIcon.icns"
 echo "✓ AppIcon.icns 已生成：$OUT_DIR/AppIcon.icns"

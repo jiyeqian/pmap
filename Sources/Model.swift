@@ -28,7 +28,7 @@ enum PortLight {
     }
 }
 
-struct Rule: Codable, Hashable, Identifiable {
+struct Rule: Codable, Hashable, Identifiable, Sendable {
     var local: Int
     var remote: Int
     var note: String? = nil   // 端口备注（隐藏高级功能：`#备注` 后缀，可选，老配置无此键时解码为 nil）
@@ -45,16 +45,42 @@ struct Group: Codable, Identifiable {
 }
 
 struct Config: Codable {
-    var host: String = ""
+    var schemaVersion = 1
+    var host = ""
     var groups: [Group] = []
-    /// 端口列表（扁平，不再分组）——持久化端口
     var adhoc: [Rule]? = nil
-    /// 已开启的本地端口（退出前保存，重启后恢复转发状态）
+    /// Desired ports, including temporarily failed forwards.
     var active: [Int]? = nil
-    /// 从面板移除的主机（仅面板层隐藏，绝不修改 ~/.ssh/config）
     var hiddenHosts: [String]? = nil
-    /// 界面语言（"zh" / "en"）；老配置无此键时按系统语言判定
     var lang: String? = nil
+    var restoreOnLaunch = true
+    var autoReconnect = true
+    var notifications = false
+    var trustedConfig = false
+    var bookmarks: [Data] = []
+    var sshDirectory: String? = nil
+
+    init() {}
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, host, groups, adhoc, active, hiddenHosts, lang
+        case restoreOnLaunch, autoReconnect, notifications, trustedConfig, bookmarks, sshDirectory
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        host = try c.decodeIfPresent(String.self, forKey: .host) ?? ""
+        groups = try c.decodeIfPresent([Group].self, forKey: .groups) ?? []
+        adhoc = try c.decodeIfPresent([Rule].self, forKey: .adhoc)
+        active = try c.decodeIfPresent([Int].self, forKey: .active)
+        hiddenHosts = try c.decodeIfPresent([String].self, forKey: .hiddenHosts)
+        lang = try c.decodeIfPresent(String.self, forKey: .lang)
+        restoreOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .restoreOnLaunch) ?? true
+        autoReconnect = try c.decodeIfPresent(Bool.self, forKey: .autoReconnect) ?? true
+        notifications = try c.decodeIfPresent(Bool.self, forKey: .notifications) ?? false
+        trustedConfig = try c.decodeIfPresent(Bool.self, forKey: .trustedConfig) ?? false
+        bookmarks = try c.decodeIfPresent([Data].self, forKey: .bookmarks) ?? []
+        sshDirectory = try c.decodeIfPresent(String.self, forKey: .sshDirectory)
+    }
 }
 
 /// 输入框错误类型（结构化存储，渲染时按语言翻译）
@@ -78,7 +104,7 @@ struct SSHTarget: Equatable {
     var aliasDefined: Bool { !hostname.isEmpty && hostname != alias }
 }
 
-enum HostConn: Equatable {
+enum HostConn: Equatable, Sendable {
     case off          // 灰：未连接
     case connecting   // 灰：连接中
     case on           // 绿：已连接

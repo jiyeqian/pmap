@@ -1,80 +1,66 @@
 #!/bin/bash
-# 构建 pmap.app（Intel + Apple Silicon 通用）
 set -euo pipefail
 cd "$(dirname "$0")"
-
-APP_NAME="pmap"
-VERSION="${PMAP_VERSION:-v0.1.5}"   # ← 版本号：优先取环境变量 PMAP_VERSION（CI 传入 tag 名），否则用默认值
-BUILD_DIR=".build-app"   # 独立目录：避免与 SPM 的 .build / test.sh 的 .build-tests 互相覆盖
-APP="${APP_NAME}.app"
-BIN="${BUILD_DIR}/${APP_NAME}-univ"
-
-rm -rf "$BUILD_DIR" "${APP}.app"
-mkdir -p "$BUILD_DIR"
-
-echo "▸ 编译通用二进制 (x86_64 + arm64)..."
-# CommandLineTools 6.4 缺少 SwiftUI 宏插件（SwiftUIMacros），改用 Xcode 工具链并显式加载
-# 路径可通过 SWIFTUI_MACROS_PLUGIN 环境变量覆盖（GitHub Actions 里动态定位），未设置则回退到本地默认路径
-XCODE_PLUGIN="${SWIFTUI_MACROS_PLUGIN:-/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib}"
-MACRO_ARGS=()
-if [ -f "$XCODE_PLUGIN" ]; then
-  MACRO_ARGS=(-load-plugin-library "$XCODE_PLUGIN")
-fi
-
-# 将版本号注入源码占位符，保证 appVersion 与 Info.plist 完全一致（单一来源 VERSION）
-# __PMAP_VERSION__ 仅出现在 Pmap.swift，但对全部源文件统一 sed 更稳健（其它文件无匹配则原样通过）
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+VERSION="${PMAP_VERSION:-0.2.0}"
+VERSION="${VERSION#v}"
+BUILD_NUMBER="${PMAP_BUILD_NUMBER:-1}"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid version: $VERSION" >&2; exit 1; }
+[[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || { echo 'Invalid build number' >&2; exit 1; }
+SANDBOX="${PMAP_SANDBOX:-0}"
+APP="${PMAP_OUTPUT_APP:-$([[ "$SANDBOX" == 1 ]] && echo pmap-sandbox.app || echo pmap.app)}"
+[[ "$APP" == *.app && "$APP" != /* && "$APP" != *..* ]] || { echo 'Output must be a relative .app path' >&2; exit 1; }
+BUILD_DIR=".build-app"
+mkdir -p "$BUILD_DIR" .build/module-cache
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$PWD/.build/module-cache}"
+FLAGS=(-swift-version 6)
+PLUGIN="$DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib"
+if [[ -f "$PLUGIN" ]]; then FLAGS+=(-load-plugin-library "$PLUGIN"); fi
+if [[ "$SANDBOX" == 1 ]]; then FLAGS+=(-D PMAP_SANDBOX); fi
+if [[ -n "${PMAP_TEST_FIXTURE:-}" ]]; then FLAGS+=(-D PMAP_TEST_HARNESS); fi
 SOURCES=()
 for src in Sources/*.swift; do
-  gen="${BUILD_DIR}/$(basename "$src" .swift).generated.swift"
-  sed "s/__PMAP_VERSION__/${VERSION}/g" "$src" > "$gen"
-  SOURCES+=("$gen")
+    gen="$BUILD_DIR/$(basename "$src" .swift).generated.swift"
+    sed "s/__PMAP_VERSION__/$VERSION/g" "$src" > "$gen"
+    SOURCES+=("$gen")
 done
-
 for ARCH in x86_64 arm64; do
-  xcrun swiftc -O -parse-as-library \
-    -target ${ARCH}-apple-macos14.0 \
-    -framework SwiftUI -framework AppKit -framework Combine \
-    "${MACRO_ARGS[@]}" \
-    -o "${BUILD_DIR}/${APP_NAME}-${ARCH}" \
-    "${SOURCES[@]}"
-  echo "  ✓ ${ARCH}"
+    xcrun swiftc -O -parse-as-library -target "${ARCH}-apple-macos14.0" \
+        -framework SwiftUI -framework AppKit -framework Combine -framework UserNotifications \
+        "${FLAGS[@]}" -o "$BUILD_DIR/pmap-$ARCH" "${SOURCES[@]}"
+    echo "✓ $ARCH"
 done
-
-echo "▸ 打包 app bundle..."
-rm -rf "${APP}/Contents/MacOS"
-mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
-lipo -create "${BUILD_DIR}/${APP_NAME}-x86_64" "${BUILD_DIR}/${APP_NAME}-arm64" \
-     -output "$BIN"
-mv "$BIN" "${APP}/Contents/MacOS/${APP_NAME}"
-
-# 生成应用图标（如不存在）
-if [ ! -f "${APP}/Contents/Resources/AppIcon.icns" ]; then
-  ./make_icon.sh >/dev/null 2>&1 || echo "  ⚠ 图标生成失败（跳过）"
+# Stage a complete bundle before replacing an existing output.
+STAGE="$BUILD_DIR/stage.app"
+rm -rf "$STAGE"
+mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
+lipo -create "$BUILD_DIR/pmap-x86_64" "$BUILD_DIR/pmap-arm64" -output "$STAGE/Contents/MacOS/pmap"
+./make_icon.sh
+cp .build/icon/AppIcon.icns "$STAGE/Contents/Resources/"
+cp docs/PRIVACY.md "$STAGE/Contents/Resources/"
+if [[ -n "${PMAP_TEST_FIXTURE:-}" ]]; then
+    mkdir -p "$STAGE/Contents/Resources/TestFixture"
+    cp "$PMAP_TEST_FIXTURE/client_key" "$PMAP_TEST_FIXTURE/known_hosts" "$STAGE/Contents/Resources/TestFixture/"
 fi
-
-cat > "${APP}/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key><string>pmap</string>
-    <key>CFBundleDisplayName</key><string>pmap</string>
-    <key>CFBundleExecutable</key><string>pmap</string>
-    <key>CFBundleIdentifier</key><string>dev.local.pmap</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundleVersion</key><string>${VERSION}</string>
-    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
-    <key>LSUIElement</key><true/>
-    <key>NSHighResolutionCapable</key><true/>
-</dict>
-</plist>
-PLIST
-
-# 签名（ad-hoc），避免 Gatekeeper 拦截
-codesign --force --deep --sign - "${APP}" 2>/dev/null || true
-
-SIZE=$(du -sh "${APP}" | cut -f1)
-echo "✓ ${APP}  (${SIZE})"
-echo "  拖到「应用程序」或直接 open ${APP}"
+python3 - "$VERSION" "$BUILD_NUMBER" "$STAGE" "$SANDBOX" <<'PY'
+import os, plistlib, sys
+version, build, stage, sandbox = sys.argv[1:]
+with open('Resources/Info.plist', 'rb') as f: info = plistlib.load(f)
+info.update(CFBundleExecutable='pmap', CFBundleIdentifier='dev.local.pmap.sandbox' if sandbox == '1' else 'dev.local.pmap',
+            CFBundleVersion=build, CFBundleShortVersionString=version, LSMinimumSystemVersion='14.0')
+info['PmapPrivacyPolicyURL'] = os.environ.get('PMAP_PRIVACY_POLICY_URL', '')
+with open(stage + '/Contents/Info.plist', 'wb') as f: plistlib.dump(info, f)
+PY
+if [[ "$SANDBOX" == 1 ]]; then
+    codesign --force --sign "${PMAP_SIGN_IDENTITY:--}" --entitlements Config/Pmap.entitlements "$STAGE"
+else
+    codesign --force --sign "${PMAP_SIGN_IDENTITY:--}" "$STAGE"
+fi
+codesign --verify --strict "$STAGE"
+# Refuse to replace a running bundle.
+if /usr/bin/pgrep -f "$PWD/$APP/Contents/MacOS/pmap" >/dev/null 2>&1; then
+    echo "Quit $APP before replacing it" >&2; exit 1
+fi
+rm -rf "$APP"
+mv "$STAGE" "$APP"
+echo "✓ $PWD/$APP (version $VERSION, build $BUILD_NUMBER, sandbox $SANDBOX)"

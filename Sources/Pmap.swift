@@ -9,533 +9,6 @@ import AppKit
 import Combine
 import UserNotifications
 
-// MARK: - 系统通知
-
-enum Notifier {
-    /// 申请通知授权（首次启动时调用）
-    static func requestAuthorization() {
-        UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound]) { _, _ in }
-    }
-
-    /// 发送一条系统通知
-    static func post(title: String, body: String, sound: UNNotificationSound = .default) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = sound
-        let request = UNNotificationRequest(identifier: UUID().uuidString,
-                                            content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
-    }
-}
-
-// MARK: - 隧道管理
-
-enum Tunnel {
-    /// 程序专用的 ControlPath，不依赖 ~/.ssh/config 里是否启用了 ControlMaster。
-    /// 所有 ssh 调用统一走这条 socket，实现连接复用 —— 这是「秒开/秒关」的关键。
-    /// 说明：ControlPath 里的 `%h` 若包含 `/` 会展开成多层目录，故这里显式用 host 拼路径。
-    static func controlPath(for host: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let dir = home + "/.ssh/pmap-control"
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        return "\(dir)/\(host)"
-    }
-
-    /// 统一的 ssh 控制参数。ControlPersist 让主连接在空闲后仍保留，避免重复握手。
-    /// StrictHostKeyChecking=accept-new：pmap 非交互运行，无法回答 ssh 的主机 key 确认提示；
-    /// 首次见到的主机自动信任并写入 known_hosts，之后 key 变化仍会拒绝（安全红线）。
-    private static func controlArgs(_ host: String) -> [String] {
-        [
-            "-o", "ControlMaster=auto",
-            "-o", "ControlPath=\(controlPath(for: host))",
-            "-o", "ControlPersist=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
-        ]
-    }
-
-    static func forward(host: String, _ r: Rule) -> String? {
-        let (code, err) = Shell.ssh(controlArgs(host) + ["-O", "forward", "-L", "127.0.0.1:\(r.local):127.0.0.1:\(r.remote)", host])
-        return code == 0 ? nil : clean(err)
-    }
-
-    static func cancel(host: String, _ r: Rule) -> String? {
-        let (code, err) = Shell.ssh(controlArgs(host) + ["-O", "cancel", "-L", "127.0.0.1:\(r.local):127.0.0.1:\(r.remote)", host])
-        return code == 0 ? nil : clean(err)
-    }
-
-    static func check(host: String) -> Bool {
-        let (code, _) = Shell.ssh(controlArgs(host) + ["-O", "check", host])
-        return code == 0
-    }
-
-    /// 断开 ControlMaster 主连接（单击已连接主机 = 断开）
-    static func shutdown(host: String) {
-        _ = Shell.ssh(controlArgs(host) + ["-O", "exit", host])
-    }
-
-    static func ensureConnection(host: String) -> PortError? {
-        if check(host: host) { return nil }
-        // 用 -M 显式建立主连接（ControlMaster 由 controlArgs 统一为 auto，-M 强制作为 master）。
-        // 不再依赖 ssh config 的 ControlPersist。
-        let (code, err) = Shell.ssh(controlArgs(host) + ["-f", "-N", host])
-        if code != 0 { return PortError.classify(clean(err), localPort: 0) }
-        for _ in 0..<20 {
-            if check(host: host) { return nil }
-            Thread.sleep(forTimeInterval: 0.15)
-        }
-        return .sshConnectTimeout
-    }
-
-    private static func clean(_ s: String) -> String {
-        s.split(separator: "\n").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
-    }
-}
-
-// MARK: - 存储
-
-@MainActor
-final class Store: ObservableObject {
-    @Published var config = Config()
-    @Published var hostState: [String: HostConn] = [:]  // 各主机连接状态
-    @Published var activeHost: String?                  // 当前已连接（绿）的主机
-    @Published var active: Set<Int> = []                // 已开启的本地端口
-    @Published var adhoc: [Rule] = []                   // 临时端口
-    @Published var errors: [Int: PortError] = [:]       // 端口 -> 结构化错误（渲染时翻译）
-    @Published var busy = false
-    @Published var quickInput = ""
-    @Published var inputInvalid: InputIssue? = nil      // 万能输入错误提示（非空则输入框红显）
-    /// 界面语言（可由底部按钮切换，写入配置持久化）
-    @Published private(set) var lang: Lang = Lang.system
-
-    @Published var hostAliases: [String] = []
-    private var heartbeatTask: Task<Void, Never>?       // 断线检测心跳（仅连接成功后运行）
-    private var retryTask: Task<Void, Never>?           // 初次连接失败后的退避重试
-    private var portRetryTask: Task<Void, Never>?       // 端口转发失败后的退避重试
-    private var pendingRetry: Set<Int> = []             // 期望开启但失败、待重试的本地端口
-
-    /// 面板上显示的主机 = ssh config 全集 - 已移除（不动 ~/.ssh/config）
-    var hiddenHosts: Set<String> { Set(config.hiddenHosts ?? []) }
-    var visibleHosts: [String] { hostAliases.filter { !hiddenHosts.contains($0) } }
-
-    private var configURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Pmap/config.json")
-    }
-
-    init() { load() }
-
-    // 持久化
-    func load() {
-        let url = configURL
-        if let d = try? Data(contentsOf: url),
-           let c = try? JSONDecoder().decode(Config.self, from: d) {
-            config = c
-        }
-        // 语言：配置优先；无配置则按系统语言（zh* → 中文，否则英文）
-        lang = config.lang.flatMap(Lang.init(rawValue:)) ?? Lang.system
-        adhoc = config.adhoc ?? []
-        active = Set(config.active ?? [])     // 恢复端口开启状态
-        refreshHosts()
-    }
-
-    /// 切换界面语言：立即生效并写入配置（下次启动沿用）
-    /// persist = false 时仅本次生效，不写盘（供开发期快照指定语言使用）
-    func setLang(_ l: Lang, persist: Bool = true) {
-        guard l != lang else { return }
-        lang = l
-        if persist {
-            config.lang = l.rawValue
-            save()
-        }
-    }
-
-    /// 切换到另一种语言（底部按钮点击即切换）
-    func toggleLang() {
-        setLang(lang.other)
-    }
-
-    /// 查表取当前语言的文案（视图层统一走这里，切语言自动刷新）
-    func t(_ key: L10n.Key) -> String {
-        L10n.text(key, lang)
-    }
-
-    func save() {
-        config.adhoc = adhoc                  // 端口持久化
-        config.active = Array(active).sorted() // 端口状态持久化
-        let url = configURL
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        if let d = try? JSONEncoder.pretty.encode(config) { try? d.write(to: url) }
-    }
-
-    /// 重新扫描 ~/.ssh/config 的主机列表（恢复到面板显示），并刷新连接状态
-    private func refreshHosts() {
-        hostAliases = SSHConfig.listHosts()
-        for h in visibleHosts where hostState[h] == nil { hostState[h] = .off }
-    }
-
-    /// 启动时：若有选中主机（config.host 非空且可见），自动连接并恢复端口转发
-    func autoConnectIfNeeded() {
-        let h = config.host
-        guard !h.isEmpty, visibleHosts.contains(h), hostState[h] == .off else { return }
-        connectHost(h, restorePorts: true)
-    }
-
-    /// 退出前：断开全部端口映射 + 断开主机
-    func shutdownAll() {
-        stopHeartbeat()
-        stopRetry()
-        stopPortRetry()
-        pendingRetry.removeAll()
-        let ports = allRules.filter { active.contains($0.local) }
-        let host = connHost ?? config.host
-        active.removeAll()
-        errors.removeAll()
-        for h in hostState.keys { hostState[h] = .off }
-        activeHost = nil
-        if !host.isEmpty {
-            Task.detached {
-                for r in ports { _ = Tunnel.cancel(host: host, r) }
-                Tunnel.shutdown(host: host)
-            }
-        }
-    }
-
-    /// 退出前同步释放：逐个取消端口转发并断开主连接（同步阻塞，确保端口在进程退出前真正释放）
-    func releaseAllSync() {
-        stopHeartbeat()
-        stopRetry()
-        stopPortRetry()
-        pendingRetry.removeAll()
-        let ports = allRules.filter { active.contains($0.local) }
-        let host = connHost ?? config.host
-        active.removeAll()
-        errors.removeAll()
-        for h in hostState.keys { hostState[h] = .off }
-        activeHost = nil
-        if !host.isEmpty {
-            for r in ports { _ = Tunnel.cancel(host: host, r) }
-            Tunnel.shutdown(host: host)
-        }
-    }
-
-    var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
-
-    /// 端口灯规则（面板端口灯与菜单灯轮播共用的单一来源）：
-    /// 主机非连通 → 灰；否则 红=转发失败重试中、绿=转发中、灰=未开启
-    func portLight(_ r: Rule) -> PortLight {
-        guard connHost != nil else { return .gray }
-        if errors[r.local] != nil { return .red }
-        if active.contains(r.local) { return .green }
-        return .gray
-    }
-    func error(_ r: Rule) -> PortError? { errors[r.local] }
-
-    var onCount: Int { allRules.filter { active.contains($0.local) }.count }
-
-    /// 当前可操作转发的主机（必须处于已连接状态）
-    private var connHost: String? {
-        guard let h = activeHost, hostState[h] == .on else { return nil }
-        return h
-    }
-
-    // MARK: 主机连接（下拉选中即连接）
-
-    private func connectHost(_ alias: String, restorePorts: Bool = false) {
-        stopHeartbeat()
-        stopRetry()
-        hostState[alias] = .connecting
-        activeHost = alias
-        config.host = alias
-        save()
-        // 记录需要恢复的端口（连接成功后再逐个重建转发）
-        let toRestore = restorePorts ? allRules.filter { active.contains($0.local) } : []
-        Task {
-            let e = await Task.detached { Tunnel.ensureConnection(host: alias) }.value
-            if e != nil {
-                hostState[alias] = .failed
-                // 初次连接失败：进入退避重试（网络就绪后自动恢复）
-                self.startRetry(host: alias, toRestore: toRestore)
-                return
-            }
-            hostState[alias] = .on
-            // 恢复退出前已开启的端口转发
-            for r in toRestore {
-                await self.attemptForward(host: alias, r)
-            }
-            self.startHeartbeat(host: alias)
-        }
-    }
-
-    private func disconnectHost(_ alias: String) {
-        stopHeartbeat()
-        stopRetry()
-        stopPortRetry()
-        pendingRetry.removeAll()
-        let ports = allRules.filter { active.contains($0.local) }
-        active.removeAll()
-        errors.removeAll()
-        hostState[alias] = .off
-        if activeHost == alias { activeHost = nil }
-        Task.detached {
-            for r in ports { _ = Tunnel.cancel(host: alias, r) }
-            Tunnel.shutdown(host: alias)
-        }
-    }
-
-    // MARK: 断线自动恢复
-
-    /// 启动心跳：每 30 秒检测一次连接是否存活，断开则自动重连并恢复端口
-    private func startHeartbeat(host: String) {
-        heartbeatTask?.cancel()
-        heartbeatTask = Task { [weak self] in
-            var wasDown = false   // 上一次检测是否为「已断开」，避免重复发通知
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-                if Task.isCancelled { break }
-                guard let self else { break }
-                // 后台检测连接是否存活
-                let alive = await Task.detached { Tunnel.check(host: host) }.value
-                if !alive {
-                    // 首次发现断线：发通知
-                    if !wasDown {
-                        Notifier.post(title: self.t(.notifyDisconnected),
-                                      body: L10n.text(.notifyReconnectBody, self.lang, host))
-                        wasDown = true
-                    }
-                    // 断线：保留 active（记住哪些端口该开），自动重连并恢复
-                    self.hostState[host] = .connecting
-                    let toRestore = self.allRules.filter { self.active.contains($0.local) }
-                    let err = await Task.detached { Tunnel.ensureConnection(host: host) }.value
-                    if err != nil {
-                        self.hostState[host] = .failed
-                        continue
-                    }
-                    self.hostState[host] = .on
-                    for r in toRestore {
-                        await self.attemptForward(host: host, r)
-                    }
-                    // 重连成功：发通知
-                    Notifier.post(title: self.t(.notifyReconnected),
-                                  body: L10n.text(.notifyReconnectedBody, self.lang, host, toRestore.count))
-                    wasDown = false
-                } else {
-                    wasDown = false
-                }
-            }
-        }
-    }
-
-    private func stopHeartbeat() {
-        heartbeatTask?.cancel()
-        heartbeatTask = nil
-    }
-
-    /// 初次连接失败后的退避重试：间隔 3s → 6s → 12s → 30s 封顶，成功即转交心跳
-    private func startRetry(host: String, toRestore: [Rule]) {
-        retryTask?.cancel()
-        retryTask = Task { [weak self] in
-            var delay: UInt64 = 3_000_000_000   // 首次 3 秒
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: delay)
-                if Task.isCancelled { break }
-                guard let self else { break }
-                // 状态已不是「失败」（用户切换主机/手动断开）则停止重试
-                guard self.hostState[host] == .failed else { break }
-                let err = await Task.detached { Tunnel.ensureConnection(host: host) }.value
-                if err != nil {
-                    delay = min(delay * 2, 30_000_000_000)   // 退避，封顶 30s
-                    continue
-                }
-                self.hostState[host] = .on
-                for r in toRestore {
-                    await self.attemptForward(host: host, r)
-                }
-                Notifier.post(title: self.t(.notifyReconnected),
-                              body: L10n.text(.notifyReconnectedBody, self.lang, host, toRestore.count))
-                self.startHeartbeat(host: host)
-                break
-            }
-        }
-    }
-
-    private func stopRetry() {
-        retryTask?.cancel()
-        retryTask = nil
-    }
-
-    /// 下拉选中主机：选中即连接（已连接则保持）
-    func selectHost(_ alias: String) {
-        if activeHost == alias && hostState[alias] == .on { return }
-        // 其余主机全部断开
-        for h in hostState.keys where h != alias && hostState[h] != .off {
-            hostState[h] = .off
-        }
-        if let cur = activeHost { disconnectHost(cur) }
-        connectHost(alias)
-    }
-
-    /// 主机状态文字（下拉框标题）
-    func hostStatusText(_ alias: String) -> String {
-        switch hostState[alias] ?? .off {
-        case .off: return t(.hostOff)
-        case .connecting: return t(.hostConnecting)
-        case .on: return t(.hostOn)
-        case .failed: return t(.hostFailed)
-        }
-    }
-
-    // 单条切换
-    func toggle(_ r: Rule) {
-        if active.contains(r.local) { close(r) } else { open(r) }
-    }
-
-    func open(_ r: Rule) {
-        guard let host = connHost else { return }
-        // 已开启则幂等跳过（避免把 ssh 自己占用的端口误判为「被占用」）
-        if active.contains(r.local) { return }
-        busy = true
-        Task {
-            defer { busy = false }
-            _ = await attemptForward(host: host, r)
-        }
-    }
-
-    /// 尝试建立端口转发：先检查本地端口占用（给出友好提示），失败自动入退避重试队列。
-    /// 返回是否转发成功。成功清错并 active.insert；失败写 errors 并 pendingRetry.insert + 启动重试。
-    @discardableResult
-    private func attemptForward(host: String, _ r: Rule) async -> Bool {
-        // 阻塞的 lsof / ssh 全部在后台线程跑，避免卡死 UI
-        let result = await Task.detached { () -> (busyBy: String?, fwdErr: String?) in
-            if let busyBy = Shell.portBusy(r.local) {
-                return (busyBy, nil)
-            }
-            return (nil, Tunnel.forward(host: host, r))
-        }.value
-
-        if let busyBy = result.busyBy {
-            errors[r.local] = .localPortBusy(port: r.local, by: (busyBy == "unknown") ? nil : busyBy)
-            pendingRetry.insert(r.local)
-            startPortRetry()
-            return false
-        }
-        if let e = result.fwdErr {
-            errors[r.local] = PortError.classify(e, localPort: r.local)
-            pendingRetry.insert(r.local)
-            startPortRetry()
-            return false
-        }
-        errors[r.local] = nil
-        active.insert(r.local)
-        pendingRetry.remove(r.local)
-        return true
-    }
-
-    func close(_ r: Rule) {
-        guard let host = connHost else { return }
-        busy = true
-        Task {
-            defer { busy = false }
-            await Task.detached { _ = Tunnel.cancel(host: host, r) }.value
-            active.remove(r.local)
-            errors[r.local] = nil
-            pendingRetry.remove(r.local)
-            if pendingRetry.isEmpty { stopPortRetry() }
-        }
-    }
-
-    // MARK: 端口转发自动恢复
-
-    /// 启动端口退避重试：遍历失败端口，占用解除即自动恢复转发
-    private func startPortRetry() {
-        guard portRetryTask == nil else { return }
-        portRetryTask = Task { [weak self] in
-            var delay: UInt64 = 5_000_000_000   // 首次 5s，翻倍封顶 30s
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: delay)
-                if Task.isCancelled { break }
-                guard let self, self.connHost != nil else { break }
-                guard !self.pendingRetry.isEmpty else { break }
-
-                let host = self.connHost!
-                // 本轮要重试的端口快照
-                let targets = self.pendingRetry.compactMap { local in
-                    self.allRules.first { $0.local == local }
-                }
-
-                var recovered = 0
-                var anyFailed = false
-                for rule in targets {
-                    if Task.isCancelled { break }
-                    if await self.attemptForward(host: host, rule) {
-                        recovered += 1
-                    } else {
-                        anyFailed = true
-                    }
-                }
-
-                if recovered > 0 {
-                    Notifier.post(title: self.t(.notifyPortsRestored),
-                                  body: L10n.text(.notifyPortsRestoredBody, self.lang, recovered))
-                }
-                if self.pendingRetry.isEmpty { break }
-                if anyFailed {
-                    delay = min(delay * 2, 30_000_000_000)   // 退避封顶 30s
-                }
-            }
-            self?.portRetryTask = nil
-        }
-    }
-
-    private func stopPortRetry() {
-        portRetryTask?.cancel()
-        portRetryTask = nil
-    }
-
-    func commitQuick() {
-        guard let (rule, _) = parseQuickInput(quickInput) else {
-            // 格式错误：清空输入，输入框内红色高亮格式提示
-            quickInput = ""
-            inputInvalid = .badFormat
-            return
-        }
-        // 本地端口冲突检查：local 不能重复（远端可重复）
-        let samePort = { (r: Rule) in r.local == rule.local }
-        if adhoc.contains(where: samePort) || config.groups.flatMap(\.rules).contains(where: samePort) {
-            quickInput = ""
-            inputInvalid = .duplicatedPort
-            return
-        }
-        adhoc.append(rule)
-        quickInput = ""
-        inputInvalid = nil
-        save()
-        // 已连接主机则自动点亮（open 内部会在无连接时保持灰）
-        open(rule)
-    }
-
-    /// 删除端口：从列表移除，并停掉映射服务（若该端口正在运行）
-    func removeRuleAnywhere(_ r: Rule) {
-        for i in config.groups.indices {
-            config.groups[i].rules.removeAll { $0.local == r.local }
-        }
-        config.groups.removeAll { $0.rules.isEmpty }
-        adhoc.removeAll { $0.local == r.local }
-        // 若端口正在运行，先停掉映射（用当前活动主机，若已断开则用 config.host 兜底）
-        if active.contains(r.local) {
-            let host = connHost ?? config.host
-            if !host.isEmpty {
-                Task.detached { _ = Tunnel.cancel(host: host, r) }
-            }
-            active.remove(r.local)
-            errors[r.local] = nil
-        }
-        save()
-    }
-}
-
 // MARK: - 视图
 
 /// 行悬停高亮（参考系统菜单：鼠标移到该项右高亮）
@@ -572,6 +45,8 @@ extension View {
 struct Chip: View {
     let rule: Rule
     let light: PortLight
+    let desired: Bool
+    let pending: Bool
     let err: PortError?
     let lang: Lang
     let action: () -> Void
@@ -581,21 +56,30 @@ struct Chip: View {
     /// 提示语：错误优先，其次是「单击开关」动作提示（二选一）
     private var hint: String {
         if let e = err { return e.description(lang) }
-        return L10n.text(light == .green ? .clickToStop : .clickToStart, lang)
+        return L10n.text(desired ? .clickToStop : .clickToStart, lang)
     }
 
     var body: some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(light.color)
-                .frame(width: 6, height: 6)
-            Text(rule.label)
+            Image(systemName: light == .green ? "checkmark.circle.fill" : (light == .red ? "exclamationmark.circle.fill" : "minus.circle"))
+                .foregroundStyle(light.color)
+                .font(.system(size: 10))
+                .frame(width: 10, height: 10)
+                .accessibilityHidden(true)
+            Button(action: action) {
+                Text(rule.label)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+                .buttonStyle(.plain)
+                .accessibilityLabel(rule.label)
+                .accessibilityValue(L10n.text(pending ? .portStarting : (light == .green ? .forwardStatus : (err != nil ? .portRetrying : .portStopped)), lang))
+                .accessibilityHint(hint)
+                .disabled(pending && !desired)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .layoutPriority(1)   // 端口号优先完整显示，空间不足时截断备注
-                .onTapGesture(count: 1) { action() }
             if let note = rule.note?.trimmingCharacters(in: .whitespaces), !note.isEmpty {
                 Text(note)
                     .font(.system(size: 11))
@@ -612,6 +96,8 @@ struct Chip: View {
             }
             .buttonStyle(.plain)
             .help(L10n.text(.deletePort, lang))
+            .accessibilityLabel(L10n.text(.deletePort, lang) + " " + rule.label)
+            .disabled(pending && !desired)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -626,6 +112,7 @@ struct Chip: View {
 struct MenuPanel: View {
     @ObservedObject var store: Store
     @FocusState var inputFocused: Bool
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -635,6 +122,22 @@ struct MenuPanel: View {
                 .padding(.top, 14)
                 .padding(.bottom, 12)
 
+            if let host = store.activeHost {
+                Text(store.hostStatusText(host))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+            }
+            if !store.canConnect {
+                Button(store.t(store.accessIssue ? .accessIssue : .setupNeeded)) { openSettings() }
+                    .font(.caption).padding(.horizontal, 12).padding(.bottom, 8)
+            }
+            if store.storageIssue {
+                Text(store.t(.storageIssue)).font(.caption).foregroundStyle(.red).padding(.horizontal, 12)
+            }
+            if let error = store.hostError {
+                Text(error.description(store.lang)).font(.caption).foregroundStyle(.red)
+                    .textSelection(.enabled).padding(.horizontal, 12).padding(.bottom, 8)
+            }
             Divider()
 
             // 端口（单列；小圆点三色 + 单色文字；单击开关，双击删除）
@@ -643,14 +146,18 @@ struct MenuPanel: View {
                     .font(.system(size: 11)).foregroundStyle(.tertiary)
                     .padding(.horizontal, 12).padding(.vertical, 10)
             } else {
-                VStack(alignment: .leading, spacing: 0) {
+                ScrollView {
+                  VStack(alignment: .leading, spacing: 0) {
                     ForEach(store.allRules) { r in
-                        Chip(rule: r, light: store.portLight(r), err: store.error(r),
+                        Chip(rule: r, light: store.portLight(r), desired: store.desired.contains(r.local),
+                             pending: store.pending.contains(r.local), err: store.error(r),
                              lang: store.lang,
                              action: { store.toggle(r) },
                              remove: { store.removeRuleAnywhere(r) })
                     }
                 }
+                  }
+                .frame(height: min(CGFloat(store.allRules.count) * 32 + 8, 280))
                 .padding(.vertical, 4)
             }
 
@@ -667,6 +174,7 @@ struct MenuPanel: View {
                     .minimumScaleFactor(0.8)
                     .foregroundStyle(store.inputInvalid != nil ? Color.red : Color.primary)
                     .focused($inputFocused)
+                    .accessibilityLabel(store.t(.portInput))
                     .onSubmit { store.commitQuick() }
                     .onChange(of: store.quickInput) { _, nv in
                         if !nv.isEmpty { store.inputInvalid = nil }
@@ -695,6 +203,11 @@ struct MenuPanel: View {
                 .help(store.t(.openHomepage))
 
                 Spacer(minLength: 0)
+
+                Button { openSettings() } label: { Image(systemName: "gearshape") }
+                    .buttonStyle(.plain)
+                    .help(store.t(.settings))
+                    .accessibilityLabel(store.t(.settings))
 
                 // 中：语言切换（显示当前语言，点击即切换到另一种）
                 Button {
@@ -729,7 +242,7 @@ struct MenuPanel: View {
 
     /// 面板宽度：英文文案更长，按语言自适应
     private var panelWidth: CGFloat {
-        store.lang == .zh ? 180 : 200
+        store.lang == .zh ? 280 : 320
     }
 
     /// 输入框占位符：错误类型决定显示内容（格式错误仍显示格式说明）
@@ -753,6 +266,11 @@ struct MenuPanel: View {
             if store.visibleHosts.isEmpty {
                 Text(store.t(.noHostsInConfig))
             }
+            if store.activeHost != nil {
+                Button(store.t(.disconnect)) { store.disconnect() }
+                Divider()
+            }
+            Button(store.t(.refreshHosts)) { store.refreshHosts() }
             ForEach(store.visibleHosts, id: \.self) { alias in
                 Button {
                     store.selectHost(alias)
@@ -783,6 +301,7 @@ struct MenuPanel: View {
             .contentShape(Rectangle())
             .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
         }
+        .disabled(!store.canConnect)
         .menuStyle(.borderlessButton)
         .frame(maxWidth: .infinity)
     }
@@ -857,9 +376,6 @@ struct PromptProbe: View {
     }
 }
 
-extension Store {
-    static var shared: Store?
-}
 
 /// 无边框面板（可成为 key window，支持输入框聚焦）
 final class PanelWindow: NSPanel {
@@ -881,13 +397,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let store = Store.shared else { return }
 
-        // 申请系统通知授权（断线/重连提醒）
-        Notifier.requestAuthorization()
 
         // 菜单栏图标 + 转发计数
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
         if let btn = item.button {
+            btn.setAccessibilityLabel("pmap")
             btn.action = #selector(togglePanel(_:))
             btn.target = self
         }
@@ -1009,6 +524,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 仅按给定颜色设置状态栏图标位图（不改变轮播状态）
     private func applyStatusIcon(ringColor: NSColor, dotColor: NSColor) {
         statusItem?.button?.image = pmapStatusBarIcon(ringColor: ringColor, dotColor: dotColor)
+        if let store = Store.shared {
+            statusItem?.button?.setAccessibilityValue("\(store.onCount) / \(store.allRules.count)")
+        }
     }
 
     /// 当前深浅色对应的前景色
@@ -1066,8 +584,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         carouselTimer?.invalidate()
         guard let store = Store.shared else { return .terminateNow }
         store.save()          // 先保存端口开启状态，便于重启恢复
-        store.releaseAllSync() // 同步取消端口转发并断开主连接（阻塞到完成）
-        return .terminateNow
+        Task {
+            await store.shutdownAll()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     /// 退出兜底：若 applicationShouldTerminate 未被触发（如系统强制退出），做最小清理
@@ -1081,7 +602,28 @@ struct PmapApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
-        Store.shared = Store()
+        #if PMAP_TEST_HARNESS
+        if CommandLine.arguments.contains("--integration") {
+            Task { exit(await IntegrationProbe.run()) }
+            return
+        }
+        #endif
+        if CommandLine.arguments.contains("--preview") {
+            let store = Store(url: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json"), scanHosts: false)
+            store.config.trustedConfig = true
+            store.hostAliases = ["demo"]
+            store.activeHost = "demo"
+            store.hostState["demo"] = .on
+            store.adhoc = (0..<(CommandLine.arguments.contains("--long-list") ? 40 : 3)).map {
+                Rule(local: 8000 + $0, remote: 80 + $0, note: $0 == 0 ? "demo" : nil)
+            }
+            store.active = [8000]
+            store.desired = [8000, 8001]
+            store.errors[8001] = .localPortBusy(port: 8001, by: "demo")
+            Store.shared = store
+        } else {
+            Store.shared = Store()
+        }
         // 自检入口：`pmap.app/Contents/MacOS/pmap --list-hosts`
         if CommandLine.arguments.contains("--list-hosts") {
             let hosts = SSHConfig.listHosts()
@@ -1124,13 +666,16 @@ struct PmapApp: App {
                                    backing: .buffered, defer: false)
                 win.title = "pmap render"
                 win.appearance = NSAppearance(named: .darkAqua)
-                let host = NSHostingView(rootView: MenuPanel(store: Store.shared!))
+                let root = CommandLine.arguments.contains("--settings")
+                    ? AnyView(SettingsView(store: Store.shared!)) : AnyView(MenuPanel(store: Store.shared!))
+                let host = NSHostingView(rootView: root)
                 win.contentView = host
                 win.center()
                 win.makeKeyAndOrderFront(nil)
                 // 用视图自身的离屏缓存渲染，拿真实像素（不受窗口遮挡影响）
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    host.frame = NSRect(x: 0, y: 0, width: 360, height: host.fittingSize.height)
+                    let size = host.fittingSize
+                    host.frame = NSRect(x: 0, y: 0, width: size.width, height: size.height)
                     win.setContentSize(host.frame.size)
                     guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
                         print("缓存渲染失败"); exit(0)
@@ -1161,6 +706,8 @@ struct PmapApp: App {
     }
 
     var body: some Scene {
-        Settings { EmptyView() }   // 仅作场景占位，UI 全部由 AppDelegate 管理
+        Settings {
+            if let store = Store.shared { SettingsView(store: store) }
+        }   // 仅作场景占位，UI 全部由 AppDelegate 管理
     }
 }

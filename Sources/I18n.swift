@@ -32,6 +32,41 @@ enum Lang: String, Codable, CaseIterable {
 enum L10n {
     /// 全部文案键。`CaseIterable` 用于单测校验「每个键都翻译齐了」。
     enum Key: String, CaseIterable {
+
+        case connectionLost
+        case settings
+        case disconnect
+        case refreshHosts
+        case setupNeeded
+        case setupTitle
+        case setupGuide
+        case configTrust
+        case configTrusted
+        case configTrustBody
+        case confirm
+        case cancelAction
+        case selectSSHFolder
+        case grantResources
+        case disconnectBeforeAccess
+        case accessIssue
+        case storageIssue
+        case restoreOnLaunch
+        case autoReconnect
+        case notificationsSetting
+        case behavior
+        case privacy
+        case copyDiagnostics
+        case privacyText
+        case revokeAccess
+        case forwardStatus
+        case portStopped
+        case portStarting
+        case portRetrying
+        case portInput
+        case prepareTerminal
+        case settingsHint
+        case closePanel
+
         // 主机状态
         case hostOff
         case hostConnecting
@@ -83,6 +118,40 @@ enum L10n {
     }
 
     private static let zh: [Key: String] = [
+        .connectionLost: "连接已断开；请查看主机状态。",
+        .settings: "设置与帮助",
+        .disconnect: "断开并停止重试",
+        .refreshHosts: "刷新主机列表",
+        .setupNeeded: "首次使用：先在设置中授权 SSH 配置。",
+        .setupTitle: "系统 SSH 配置",
+        .setupGuide: "先在终端确认 ssh 主机别名 可以登录。pmap 使用系统 OpenSSH 和现有密钥，以非交互方式运行。首次主机指纹确认、密码及密钥解锁请在终端完成。",
+        .configTrust: "信任并使用此 SSH 配置…",
+        .configTrusted: "已授权使用 SSH 配置",
+        .configTrustBody: "SSH 配置中的 ProxyCommand 和 Match exec 可能运行程序；LocalCommand、Agent/X11 转发及配置内端口映射会被禁用。仅授权你信任的配置。沙盒中仍可能因外部文件或 SSH Agent 权限而失败。",
+        .confirm: "确认授权",
+        .cancelAction: "取消",
+        .selectSSHFolder: "选择 .ssh 文件夹…",
+        .grantResources: "授权额外文件或文件夹…",
+        .disconnectBeforeAccess: "修改文件授权前请先断开连接。",
+        .accessIssue: "SSH 文件不可读或授权已失效，请在设置中重新授权。",
+        .storageIssue: "配置读取或保存失败。请检查权限；损坏的原文件不会被覆盖。",
+        .restoreOnLaunch: "启动时恢复上次连接与端口",
+        .autoReconnect: "自动重连并重试失败端口",
+        .notificationsSetting: "连接中断时通知我",
+        .behavior: "连接行为",
+        .privacy: "隐私政策",
+        .copyDiagnostics: "复制脱敏诊断",
+        .privacyText: "pmap 连接你指定的 SSH 服务器，不含广告、统计或开发者遥测。主机配置、端口与文件授权保存在本机。私钥不被复制到应用配置；系统 SSH 读取你授权的原文件。主机指纹必须先由你确认，pmap 不自动信任新主机。通知不显示主机名或地址。点击项目主页会打开浏览器。撤销访问可使用下方按钮；它不会删除原 SSH 文件。",
+        .revokeAccess: "撤销文件访问与配置信任",
+        .forwardStatus: "转发已建立；未检测远端服务健康",
+        .portStopped: "已停止",
+        .portStarting: "处理中",
+        .portRetrying: "失败或等待重试",
+        .portInput: "本地端口或本地端口:远程端口",
+        .prepareTerminal: "复制 SSH 命令并打开终端",
+        .settingsHint: "支持 Host、Include、IdentityFile 和 ProxyJump；外部资源需要单独授权。ProxyCommand、Match exec、SSH Agent 和系统钥匙串兼容性取决于沙盒权限，不保证与终端完全一致。",
+        .closePanel: "关闭面板",
+
         .hostOff: "断开",
         .hostConnecting: "连接中…",
         .hostOn: "连通",
@@ -108,7 +177,7 @@ enum L10n {
         .notifyDisconnected: "pmap 连接断开",
         .notifyReconnectBody: "主机 {0} 已断开，正在自动重连…",
         .notifyReconnected: "pmap 已重连",
-        .notifyReconnectedBody: "主机 {0} 连接已恢复，{1} 个端口转发已重建",
+        .notifyReconnectedBody: "主机 {0} 连接已恢复，{1} 个端口待恢复",
         .notifyPortsRestored: "pmap 端口已恢复",
         .notifyPortsRestoredBody: "{0} 个端口转发已自动恢复",
 
@@ -129,6 +198,40 @@ enum L10n {
     ]
 
     private static let en: [Key: String] = [
+        .connectionLost: "Connection lost. Check the host status.",
+        .settings: "Settings & Help",
+        .disconnect: "Disconnect & Stop Retrying",
+        .refreshHosts: "Refresh Hosts",
+        .setupNeeded: "First use: authorize your SSH configuration in Settings.",
+        .setupTitle: "System SSH Configuration",
+        .setupGuide: "First verify that ssh host-alias works in Terminal. pmap uses system OpenSSH and existing keys without an interactive terminal. Verify new host fingerprints and unlock keys in Terminal.",
+        .configTrust: "Trust and Use This SSH Configuration…",
+        .configTrusted: "SSH configuration authorized",
+        .configTrustBody: "ProxyCommand and Match exec in SSH configuration may execute programs. LocalCommand, agent/X11 forwarding, and configured port forwards are disabled. Only authorize trusted configuration. External files and SSH Agent access may still fail in the sandbox.",
+        .confirm: "Authorize",
+        .cancelAction: "Cancel",
+        .selectSSHFolder: "Select .ssh Folder…",
+        .grantResources: "Authorize Additional Files or Folders…",
+        .disconnectBeforeAccess: "Disconnect before changing file access.",
+        .accessIssue: "SSH files are unavailable or access has expired. Reauthorize in Settings.",
+        .storageIssue: "Configuration could not be read or saved. Check permissions; a damaged original is never overwritten.",
+        .restoreOnLaunch: "Restore Connection and Ports on Launch",
+        .autoReconnect: "Reconnect and Retry Failed Ports",
+        .notificationsSetting: "Notify Me When a Connection Drops",
+        .behavior: "Connection Behavior",
+        .privacy: "Privacy Policy",
+        .copyDiagnostics: "Copy Redacted Diagnostics",
+        .privacyText: "pmap connects to SSH servers you specify. It contains no advertising, analytics, or developer telemetry. Configuration, ports, and file permissions are stored locally. Private keys are not copied into app configuration; system SSH reads authorized original files. You must verify host fingerprints first; pmap never automatically trusts new hosts. Notifications omit host names and addresses. Opening the project homepage launches a browser. Revoke access below without deleting original SSH files.",
+        .revokeAccess: "Revoke File Access and Configuration Trust",
+        .forwardStatus: "Forward established; remote service health is not checked",
+        .portStopped: "Stopped",
+        .portStarting: "Working",
+        .portRetrying: "Failed or Waiting to Retry",
+        .portInput: "Local Port or Local Port:Remote Port",
+        .prepareTerminal: "Copy SSH Command and Open Terminal",
+        .settingsHint: "Supports Host, Include, IdentityFile, and ProxyJump; external resources need separate authorization. ProxyCommand, Match exec, SSH Agent, and system Keychain compatibility depend on sandbox permissions and may differ from Terminal.",
+        .closePanel: "Close Panel",
+
         .hostOff: "Off",
         .hostConnecting: "Connecting…",
         .hostOn: "On",
@@ -154,7 +257,7 @@ enum L10n {
         .notifyDisconnected: "pmap disconnected",
         .notifyReconnectBody: "Host {0} dropped; reconnecting…",
         .notifyReconnected: "pmap reconnected",
-        .notifyReconnectedBody: "Host {0} restored; {1} port forward(s) rebuilt",
+        .notifyReconnectedBody: "Host {0} restored; {1} port forward(s) pending",
         .notifyPortsRestored: "pmap ports restored",
         .notifyPortsRestoredBody: "{0} port forward(s) recovered automatically",
 
