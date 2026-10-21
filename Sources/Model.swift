@@ -2,8 +2,31 @@
 // 纯数据模型：端口规则、分组、配置、SSH 目标、连接状态
 
 import Foundation
+import SwiftUI
 
 // MARK: - 模型
+
+/// 端口灯三态（面板端口灯与菜单灯轮播共用的单一规则来源）
+/// 绿=转发中；红=转发失败（重试中）/ 本地端口被占用；灰=未开启 / 主机未连通
+enum PortLight {
+    case green, red, gray
+
+    var color: Color {
+        switch self {
+        case .green: .green
+        case .red: .red
+        case .gray: Color(nsColor: .systemGray)
+        }
+    }
+
+    var nsColor: NSColor {
+        switch self {
+        case .green: .systemGreen
+        case .red: .systemRed
+        case .gray: .systemGray
+        }
+    }
+}
 
 struct Rule: Codable, Hashable, Identifiable {
     var local: Int

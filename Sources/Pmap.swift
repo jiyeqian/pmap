@@ -198,8 +198,14 @@ final class Store: ObservableObject {
 
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
 
-    /// 端口是否「实际转发中」：既在期望集合中，且当前主机处于连通状态
-    func isForwarding(_ r: Rule) -> Bool { active.contains(r.local) && connHost != nil }
+    /// 端口灯规则（面板端口灯与菜单灯轮播共用的单一来源）：
+    /// 主机非连通 → 灰；否则 红=转发失败重试中、绿=转发中、灰=未开启
+    func portLight(_ r: Rule) -> PortLight {
+        guard connHost != nil else { return .gray }
+        if errors[r.local] != nil { return .red }
+        if active.contains(r.local) { return .green }
+        return .gray
+    }
     func error(_ r: Rule) -> String? { errors[r.local] }
 
     var onCount: Int { allRules.filter { active.contains($0.local) }.count }
@@ -525,25 +531,21 @@ extension View {
 /// 端口行：小圆点（三色状态）+ 端口文字（单色）+ 右侧删除图标
 struct Chip: View {
     let rule: Rule
-    let on: Bool
+    let light: PortLight
     let err: String?
     let action: () -> Void
     let remove: () -> Void
     @State private var hovering = false
 
-    private var dotColor: Color {
-        if err != nil { return .red }
-        return on ? .green : Color.secondary.opacity(0.5)
-    }
     private var hint: String {
         if let e = err { return e }
-        return on ? "单击关闭" : "单击开启"
+        return light == .green ? "单击关闭" : "单击开启"
     }
 
     var body: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(dotColor)
+                .fill(light.color)
                 .frame(width: 6, height: 6)
             Text(rule.label)
                 .font(.system(size: 12, design: .monospaced))
@@ -601,7 +603,7 @@ struct MenuPanel: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(store.allRules) { r in
-                        Chip(rule: r, on: store.isForwarding(r), err: store.error(r),
+                        Chip(rule: r, light: store.portLight(r), err: store.error(r),
                              action: { store.toggle(r) },
                              remove: { store.removeRuleAnywhere(r) })
                     }
@@ -722,10 +724,10 @@ struct MenuPanel: View {
     }
 
     private var hostStatusColor: Color {
-        guard let h = store.activeHost else { return .secondary }
+        guard let h = store.activeHost else { return Color(nsColor: .systemGray) }
         switch store.hostState[h] ?? .off {
-        case .off: return .secondary
-        case .connecting: return .secondary
+        case .off: return Color(nsColor: .systemGray)
+        case .connecting: return Color(nsColor: .systemGray)
         case .on: return .green
         case .failed: return .red
         }
@@ -893,10 +895,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let ringColor: NSColor = isDark ? .white : .black
 
-        // 轮播序列：已开启端口（按 allRules 顺序）→ 状态色（红=故障、绿=正常）；未开启端口不参与
-        let newColors: [NSColor] = store.allRules
-            .filter { store.active.contains($0.local) }
-            .map { store.errors[$0.local] != nil ? PmapColors.red : PmapColors.green }
+        // 轮播序列：全部端口（按 allRules 顺序）→ 端口灯规则色（与面板 Chip 同一函数）
+        // 主机未连通时全部端口灯为灰 → 轮播序列全灰（纯端口中心，主机故障也灰）
+        let newColors: [NSColor] = store.allRules.map { store.portLight($0).nsColor }
 
         // 序列变化则重置轮播索引（数量或内容不同）
         if newColors.count != carouselColors.count
@@ -905,7 +906,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         carouselColors = newColors
 
-        // 空序列（无开启端口 / 主机未连接）→ 灰点，停表
+        // 空序列（无任何端口）→ 灰点，停表
         if newColors.isEmpty {
             carouselTimer?.invalidate()
             carouselTimer = nil

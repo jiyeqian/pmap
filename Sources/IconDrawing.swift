@@ -35,7 +35,7 @@ enum PmapIconGeometry {
 enum PmapColors {
     static let green = NSColor.systemGreen   // 圆点：正常/连通（#30D158）
     static let red = NSColor.systemRed       // 圆点：故障（#FF4245）
-    static let idleGray = NSColor(calibratedWhite: 0.55, alpha: 1) // 圆点：空闲/未连接
+    static let idleGray = NSColor.systemGray // 圆点：空闲/未连接（系统灰，与绿/红同一取色方式）
     static let bg = NSColor(calibratedRed: 0.17, green: 0.17, blue: 0.18, alpha: 1) // #2B2B2E
 }
 
