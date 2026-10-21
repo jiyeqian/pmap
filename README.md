@@ -193,6 +193,7 @@ pmap 使用独立的 ControlPath 目录，不依赖 `~/.ssh/config` 中是否启
 - pmap 是本地工具，不联网、不收集任何数据。
 - 不会修改 `~/.ssh/config`，只读取主机列表。
 - 端口转发通过本机 `ssh` 完成，复用你既有的 SSH 认证。
+- **首次连接新主机**：pmap 非交互运行，无法回答 ssh 的「是否信任此主机」确认提示，因此首次见到的主机会自动信任其 host key 并写入 `~/.ssh/known_hosts`（等同于在终端手动执行一次 `ssh <host>`）。该机制只信任「第一次见到」的主机；若主机 key 之后发生变化（重装系统、中间人攻击等），pmap 仍会拒绝连接并报错。注意：pmap 对所有连接统一应用此设置，优先级高于 `~/.ssh/config` 中的 `StrictHostKeyChecking`。
 
 ## License
 

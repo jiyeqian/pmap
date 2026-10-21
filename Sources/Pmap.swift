@@ -44,11 +44,14 @@ enum Tunnel {
     }
 
     /// 统一的 ssh 控制参数。ControlPersist 让主连接在空闲后仍保留，避免重复握手。
+    /// StrictHostKeyChecking=accept-new：pmap 非交互运行，无法回答 ssh 的主机 key 确认提示；
+    /// 首次见到的主机自动信任并写入 known_hosts，之后 key 变化仍会拒绝（安全红线）。
     private static func controlArgs(_ host: String) -> [String] {
         [
             "-o", "ControlMaster=auto",
             "-o", "ControlPath=\(controlPath(for: host))",
             "-o", "ControlPersist=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
         ]
     }
 
