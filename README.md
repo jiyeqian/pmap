@@ -1,221 +1,83 @@
 <div align="center">
   <img src="./docs/logo.svg" alt="pmap logo" width="180">
-
   <h1>pmap</h1>
-
-<p>
-  <a href="https://github.com/jiyeqian/pmap/actions/workflows/release.yml"><img src="https://github.com/jiyeqian/pmap/actions/workflows/release.yml/badge.svg" alt="Release CI"></a>
-  <a href="https://github.com/jiyeqian/pmap/releases"><img src="https://img.shields.io/github/v/release/jiyeqian/pmap?style=flat-square" alt="Version"></a>
-  <a href="https://github.com/jiyeqian/pmap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jiyeqian/pmap?style=flat-square" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/macOS-14.0%2B-black?style=flat-square&logo=apple" alt="macOS 14.0+">
-</p>
-<p>
-  <b><a href="https://github.com/jiyeqian/pmap/releases">下载</a></b> &nbsp;&middot;&nbsp;
-  <b><a href="https://github.com/jiyeqian/pmap/issues">问题反馈</a></b> &nbsp;&middot;&nbsp;
-  <b><a href="https://github.com/jiyeqian/pmap/blob/main/LICENSE">License</a></b>
-</p>
+  <p>macOS 菜单栏 SSH 本地端口转发管理器</p>
+  <p><a href="https://github.com/jiyeqian/pmap/releases">下载</a> · <a href="https://github.com/jiyeqian/pmap/issues">反馈</a> · <a href="./LICENSE">MIT License</a></p>
 </div>
 
-macOS 菜单栏端口映射（SSH 端口转发）管理器。用一个极简的弹出面板，点选主机、开关端口，秒级建立 / 断开本地到远程的端口转发，无需记忆 `ssh -L` 命令。
+pmap 为现有系统 OpenSSH 环境提供图形控制面板：选择主机，输入 `8000` 或 `8000:80`，开启或停止本地到远程回环地址的端口转发。支持 macOS 14+，构建为 Intel 与 Apple Silicon 通用二进制。
 
-> 基于 SSH ControlMaster 连接复用：首次连接后，之后的开 / 关端口都走同一条已建立的连接，几乎零延迟。
+当前改造分支为下一版 0.2.0 候选版本；`v0.1.5` 标签保留改造前基线。尚未完成正式 App Store 签名、上传或审核。
 
-## 安装
-
-### 方式一：下载 DMG（推荐）
-
-从 [Releases](https://github.com/jiyeqian/pmap/releases) 下载最新 `pmap.dmg`，打开后把 `pmap.app` 拖入「应用程序」即可。
-
-### 方式二：从源码构建
+## 构建与启动
 
 ```bash
-git clone https://github.com/jiyeqian/pmap.git
-cd pmap
+cd /Users/jiyeqian/Workspace/pmap
+./test.sh
 ./build.sh
-open pmap.app
+./scripts/verify-bundle.sh pmap.app
+open /Users/jiyeqian/Workspace/pmap/pmap.app
 ```
 
-构建产物 `pmap.app` 是 Intel + Apple Silicon 通用二进制。
+需要完整 Xcode 工具链。启动新构建前先正常退出旧实例；构建脚本会拒绝替换检测到的运行中输出。图标或签名失败会阻断构建。普通本地包使用临时签名，没有 Apple 公证；这不等同于正式商店分发。
 
-- 应用图标（`AppIcon.icns`）由 `make_icon.sh` 生成：深灰黑背景 + 白色圆环与胶囊竖笔 + 绿色圆点（`p` 与上下翻转 `p` 绕中心旋转对称、共享一个圆环与圆点，表达端口相连），与菜单栏图标同源，绘制逻辑集中在 `Sources/IconDrawing.swift`。`build.sh` 会在图标不存在时自动调用它；如需单独重新生成，运行 `./make_icon.sh` 即可。
-- 单元测试用 `./test.sh` 运行（Swift Testing 框架，覆盖端口解析 / SSH 配置解析等纯函数）。
-
-> 构建依赖 Xcode 工具链（macOS 自带 CommandLineTools 6.4 缺少 SwiftUI 宏插件，`build.sh` 会自动检测并加载 Xcode 里的 `libSwiftUIMacros.dylib`）。
->
-> GitHub Actions 的 release 构建使用 `macos-26` runner（带 macOS 26/27 SDK 的新版 SwiftUI），与本机 macOS 26+ SDK 构建的 UI 渲染效果一致。
-
-### 首次打开的安全提示
-
-pmap 未做 Apple 公证（无付费开发者证书），首次打开时 macOS 会提示 **"pmap" Not Opened**（Apple could not verify...）。这是 Gatekeeper 对所有未经公证应用的统一拦截，不代表软件有问题。两种放行方式任选其一：
-
-**方式 A：系统设置放行（推荐）**
-
-1. 点弹窗的 **Done** 关闭提示
-2. 打开 **系统设置 → 隐私与安全性**，拉到底部
-3. 找到 "pmap" was blocked... 一行，点 **Open Anyway** → 再点 **Open**
-
-**方式 B：终端一条命令**
+沙盒候选构建：
 
 ```bash
-xattr -cr /Applications/pmap.app
+cd /Users/jiyeqian/Workspace/pmap
+PMAP_SANDBOX=1 ./build.sh
+PMAP_REQUIRE_SANDBOX=1 ./scripts/verify-bundle.sh pmap-sandbox.app
+open /Users/jiyeqian/Workspace/pmap/pmap-sandbox.app
 ```
 
-放行一次后，之后打开不再有任何提示。
+完整 Xcode 工程、真实 SSH 集成测试和人工验收方法见 [商店准备与验收](./docs/APP_STORE.md)。
 
-## 特性
+## 首次使用
 
-- 菜单栏图标 + 极简下拉面板（无 Dock 图标，纯状态栏应用）
-- 主机通过下拉菜单选择，选中即连接；文字与颜色随状态切换（断开 / 连接中 / 连通 / 故障）
-- 端口一行一个，小圆点表示状态：**绿 = 通，灰 = 不通，红 = 故障**
-  - 单击端口：开启 / 关闭转发
-  - 单击行尾删除图标：删除端口（同时停掉该端口的映射服务）
-- 万能输入框：`port` 或 `port:port` 一键添加端口
-- **中英双语**：面板底部一键切换「中 / EN」，切换即时生效并被记住（首次启动跟随系统语言）
-- 自动保存：端口列表、选中主机、端口开启状态全部持久化；重启后自动重连主机并恢复转发
-- 退出时自动断开全部映射；重启后恢复退出前的状态
-- **断线自动重连**：连接成功后每 30 秒心跳检测；初次连接失败也会自动重试（3s → 6s → 12s → 30s 退避），网络恢复后自动重连并重建端口转发
-- **绝不修改 `~/.ssh/config`** —— 只读取，不写入
+1. 在终端确认 `ssh 主机别名` 的主机指纹可信且认证可用；需要密码或私钥解锁时先在终端处理。
+2. 点击菜单栏 pmap 图标，再点击齿轮打开“设置与帮助”。阅读并确认 SSH 配置信任说明。
+3. 沙盒版通过文件选择器授权 `.ssh` 文件夹；外部 Include、密钥等文件需要分别授权。取消选择不会授权。
+4. 刷新主机列表，选择主机开始连接；连接失败时面板显示错误原因。
+5. 添加端口并用浏览器或客户端验证实际服务响应。
 
-## 系统要求
+pmap 运行非交互式系统 SSH，强制严格主机校验，不自动信任新主机或接受变更的主机密钥。SSH Agent、系统钥匙串和外部命令在沙盒内可能受限，不能保证与终端完全一致。
 
-- macOS 14.0 (Sonoma) 及以上（构建目标为 `macos14.0`；CI 的 `macos-26` runner 仅是编译环境，不影响最低系统要求）
-- Intel (x86_64) 与 Apple Silicon (arm64) 通用二进制
-- 本机的 `~/.ssh/config` 里需要有至少一个 Host 条目（主机的认证需已配置好，如密钥登录）
+## 操作与状态
 
-## 使用
+| 操作 | 行为 |
+| --- | --- |
+| 输入 `8000` | 本地 `127.0.0.1:8000` → 远程 `127.0.0.1:8000` |
+| 输入 `8000:80` | 本地 `127.0.0.1:8000` → 远程 `127.0.0.1:80` |
+| 输入 `5432:5432#数据库` | 添加转发并显示备注 |
+| 点击端口按钮 | 开启，或停止转发/重试 |
+| 点击删除按钮 | 清理转发后删除规则；清理失败时保留规则与错误 |
+| 主机菜单“断开并停止重试” | 断开当前主机及端口，取消待恢复状态 |
+| 底部“中 / EN” | 切换并保存界面语言 |
+| 设置 | 控制启动恢复、自动重连、通知和文件授权 |
+| 退出 | 保存期望状态，异步释放受管 SSH 会话与监听 |
 
-1. 点击菜单栏图标（圆环 + 圆点，圆点随状态染色：绿=连通、红=故障、灰=空闲），弹出面板。
-2. **选择主机**：点击顶部下拉框，选一台主机即自动连接（连接成功后文字变绿）。
-3. **添加端口**：在底部输入框输入 `8000` 或 `8000:80`，回车。有主机已连接时会自动开启转发。
-4. **开关端口**：单击端口行切换开启 / 关闭。
-5. **删除端口**：单击端口行右侧的 `×` 图标（会同时停掉该端口的映射）。
-6. **退出**：面板底部右侧的「退出 / Quit」。退出时会断开全部映射并保存状态。
-7. **切换语言**：单击面板底部中间的「中 / EN」按钮即可在中文与 English 之间切换，**立即生效**；选择会被记住，下次启动沿用（首次启动默认跟随系统语言）。
+端口绿灯表示转发请求已建立，**不表示远端服务健康**；红灯表示失败；主机未连接时端口为灰。菜单栏圆点按端口顺序轮播，不能代替主机错误详情。端口按钮提供辅助功能名称和状态，长列表支持滚动。
 
-> 面板底部为单栏三段式：左侧是当前版本号（点击打开项目主页），中间是语言切换按钮（显示当前语言，点击切换），右侧是「退出 / Quit」。
+自动重试仅用于可恢复故障；认证、主机密钥及明确禁止转发等错误需要用户处理。通知默认关闭，启用时才申请系统授权，不在通知里显示主机名或地址。
 
-### 端口格式
+## 配置与兼容性
 
-| 输入 | 含义 |
-|------|------|
-| `8000` | 本地 8000 ↔ 远程 8000 |
-| `8000:80` | 本地 8000 → 远程 80 |
-| `8000:80#前端` | 本地 8000 → 远程 80，备注「前端」 |
+普通构建配置：`~/Library/Application Support/Pmap/config.json`。沙盒构建保存在对应应用容器内，应用支持目录由系统 API 确定；两种构建不自动互相迁移配置。
 
-- 本地端口不能重复（同一本地端口只能映射一次）；远端端口可以重复。
-- 本地端口冲突时，输入框会红字提示「本地端口已映射」。
+配置原子保存并校验端口。损坏或不支持的配置版本会提示错误并保留原文件，不会静默覆盖。`active` 字段保存用户期望恢复的端口，而不是声称这些端口在任何时刻都实际连通。
 
-> 端口备注是隐藏的高级功能：在端口号后加 `#备注` 即可（如 `5432:5432#数据库`），面板中会以次级灰字显示在端口号旁。输入框不会提示该语法，仅创建时填写、之后只读；不加 `#` 时行为与普通端口完全一致。
+pmap 只读系统 SSH 配置和密钥。支持具体 Host 别名（包括含点别名）及有界递归 Include。User、HostName、Port、IdentityFile 和 ProxyJump 交给系统 OpenSSH 解析。配置里的 LocalCommand、Agent/X11 转发和额外端口映射被禁用，仅管理面板声明的本地转发。
 
-### 状态灯规则
+ProxyCommand 和 Match exec 可能执行程序，因此仅在用户确认信任配置后运行，并仍受沙盒权限约束。完整边界见 [SSH 兼容契约](./docs/APP_STORE.md)。
 
-pmap 有三层状态灯，颜色语义如下：
+## 隐私与发布
 
-| 灯 | 位置 | 绿 | 红 | 灰 |
-|---|---|---|---|---|
-| 主机灯 | 面板顶部主机名 + 菜单栏圆环内圆点（聚合） | 已连通 | 连接故障 | 断开 / 连接中 |
-| 端口灯 | 面板内每行端口前的圆点 | 转发中 | 转发失败（重试中）/ 本地端口被占用 | 未开启 / 主机未连通 |
-| 菜单灯 | 菜单栏图标的圆点 | 轮播到绿灯端口 | 轮播到红灯端口 | 无端口 / 轮播到灰灯端口 |
+pmap 连接你指定的服务器，不向开发者发送遥测，不含广告或统计 SDK。密钥不复制到应用配置；诊断复制不含主机名、地址、路径和备注。完整说明见 [隐私政策](./docs/PRIVACY.md)，应用设置中也可阅读。
 
-规则要点：
+商店所需公开隐私政策 URL、发布主体、审核测试服务和加密出口申报仍需在正式提交前确认。现有文案为 [商店材料草案](./docs/STORE_METADATA.md)，不表示已上线。
 
-- **主机灯**：连通 = 绿，故障 = 红，其余 = 灰。
-- **端口灯**：主机为绿时，灯在三态间切换（绿=转发中、红=失败重试中、灰=未开启）；**主机为红/灰时，端口灯永远为灰**（转发通道不存在，无从谈端口健康）。
-- **菜单灯**：按端口列表顺序**轮流显示每个端口灯的颜色，每个 1.5 秒**；纯端口中心——主机故障时所有端口灯为灰，菜单灯也为灰；没有任何端口时菜单灯为灰。「端口不是绿的，菜单灯就永远不绿」。
+## 测试与贡献
 
-#### 遇到红 / 灰怎么办
-
-| 情况 | 含义 | 应对 |
-|---|---|---|
-| 端口灯红 | 主机连通但该端口转发失败（或本地端口被占用） | pmap 会自动退避重试；若提示「本地端口被 X 占用」，关闭占用该端口的本地程序，或删除该端口换一个本地端口 |
-| 主机灯红 | 连接故障 | 检查网络与 SSH 可达性；pmap 自动重试，恢复后自动重建端口转发 |
-| 主机灯灰 | 未选择主机或连接中 | 在面板选择主机即自动连接 |
-| 端口灯灰 | 未开启，或主机未连通 | 单击开启；主机未连通时先解决主机连接 |
-| 菜单灯灰 | 当前没有任何端口灯为绿（未开端口或主机未连通） | 点开面板查看主机与端口详情 |
-
-## 配置文件
-
-### 程序配置（pmap 自身）
-
-pmap 会在启动时读取、退出时保存以下文件：
-
-```
-~/Library/Application Support/Pmap/config.json
-```
-
-这是一个 JSON 文件，保存了：
-
-| 字段 | 含义 |
-|------|------|
-| `host` | 上次选中的主机别名 |
-| `adhoc` | 端口列表（每项含 `local` 与 `remote` 端口，可含可选 `note` 备注） |
-| `active` | 退出前已开启的本地端口列表（重启后据此恢复转发） |
-| `lang` | 界面语言（`zh` / `en`）；无此字段时按系统语言判定 |
-
-示例：
-
-```json
-{
-  "host": "myserver",
-  "adhoc": [
-    { "local": 8000, "remote": 8000 },
-    { "local": 3000, "remote": 80 },
-    { "local": 5432, "remote": 5432, "note": "数据库" }
-  ],
-  "active": [ 8000 ]
-}
-```
-
-- 重启 pmap 后，会自动连接 `host` 并恢复 `active` 中列出的端口转发。
-- 该文件由程序自动管理，无需手动编辑；如需重置，删除该文件后重启即可。
-
-### SSH 配置（只读引用）
-
-pmap **读取**你本机的 `~/.ssh/config` 来获取主机列表（Host 别名），但**绝不会写入或修改**它。
-
-- 主机的地址、端口、用户名、密钥、跳板机（ProxyJump）等参数均由 `~/.ssh/config` 定义。
-- 需要新增 / 修改主机时，请直接编辑 `~/.ssh/config`，然后重启 pmap 即可看到变化。
-- 主机认证（密钥、密码）沿用你 SSH 的既有配置。
-
-#### 哪些主机会显示
-
-pmap 只显示 `~/.ssh/config` 中满足以下条件的 Host 别名：
-
-| 规则 | 是否显示 | 示例 |
-|------|---------|------|
-| 不含点号、不含通配符的别名 | ✅ 显示 | `mbp16`、`pi4`、`myserver` |
-| 含点号（域名/地址） | ❌ 不显示 | `bitbucket.org`、`github.com` |
-| 含通配符（`*` `?` `!`） | ❌ 不显示 | `Host *.example.com` |
-| 指向本机（`localhost` / `127.0.0.1` / `::1`） | ❌ 不显示 | `Host localhost` |
-
-> 设计意图：含点的 Host 通常是 Git 托管等域名的访问入口，而非需要开端口隧道的远程主机。
-> 若某个含点主机确实需要通过 pmap 管理，给它加一个无点别名即可，例如：
->
-> ```
-> Host bitbucket
->     HostName altssh.bitbucket.org
->     User git
->     Port 443
->     IdentityFile ~/.ssh/id_ed25519
-> ```
-
-### 连接复用（ControlPath）
-
-pmap 使用独立的 ControlPath 目录，不依赖 `~/.ssh/config` 中是否启用了 ControlMaster：
-
-```
-~/.ssh/pmap-control/<主机别名>
-```
-
-这是 pmap 实现「秒级开关端口」的关键。退出时 pmap 会主动断开这些复用连接（`ssh -O exit`）。
-
-## 隐私与安全
-
-- pmap 是本地工具，不联网、不收集任何数据。
-- 不会修改 `~/.ssh/config`，只读取主机列表。
-- 端口转发通过本机 `ssh` 完成，复用你既有的 SSH 认证。
-- **首次连接新主机**：pmap 非交互运行，无法回答 ssh 的「是否信任此主机」确认提示，因此首次见到的主机会自动信任其 host key 并写入 `~/.ssh/known_hosts`（等同于在终端手动执行一次 `ssh <host>`）。该机制只信任「第一次见到」的主机；若主机 key 之后发生变化（重装系统、中间人攻击等），pmap 仍会拒绝连接并报错。注意：pmap 对所有连接统一应用此设置，优先级高于 `~/.ssh/config` 中的 `StrictHostKeyChecking`。
-
-## License
-
-本项目采用 [MIT License](LICENSE) 开源。
+- 单元与生命周期测试：`./test.sh`。
+- 隔离的本机真实 SSH 沙盒测试：`./scripts/integration-test.sh`，使用临时密钥和回环服务，不修改系统 SSH 配置。
+- [贡献规范](./CONTRIBUTING.md)；[MIT License](./LICENSE)。

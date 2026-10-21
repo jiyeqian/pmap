@@ -65,19 +65,21 @@ git log --oneline -20
 
 ## 版本号与发布
 
-版本号的单一来源是 `build.sh` 中 `Info.plist` 的 `CFBundleVersion` 与 `CFBundleShortVersionString`（两者都写带 `v` 前缀的版本号），`Sources/Pmap.swift` 中 `appVersion` 的兜底默认值也必须同步为相同的 `v` 版本号。
+普通构建的默认营销版本在 `build.sh`，Xcode 工程的 `MARKETING_VERSION` 保持一致。`CFBundleShortVersionString` 使用不带 `v` 的三段数字，例如 `0.2.0`；`CFBundleVersion` 使用独立递增的数字构建号，通过 `PMAP_BUILD_NUMBER` 或 Xcode `CURRENT_PROJECT_VERSION` 设置。
 
-升级版本时这三处要一起改，对应的 Git tag 也使用 `v` 前缀（如 `v0.1.4`）。CI 由 `v*` tag 触发发布流程。
+Git 标签保留 `v` 前缀，例如 `v0.1.5`；CI 会移除前缀后写入营销版本，并使用工作流运行号作为构建号。界面优先读取 Info.plist。版本升级时同步脚本、Xcode 工程和相关文档。
+
+推送 `v*` 标签会触发 GitHub Release；创建本地标签不等于授权推送或正式商店发布。商店归档使用 `scripts/archive-store.sh`，必须明确配置开发者团队、正式 Bundle ID 和构建号。
 
 ## 构建与测试
 
 ```bash
 ./build.sh    # 编译并打包 pmap.app
 ./test.sh     # 运行单元测试
-./make_icon.sh # 重新生成 App 图标
+./make_icon.sh # 重新生成 .build/icon/AppIcon.icns
 ```
 
-> 注意：`build.sh` 会删除并重建 `pmap.app`。请先退出正在运行的 pmap，否则运行中实例的 bundle 会失效，导致状态栏图标消失。
+> `build.sh` 先完成暂存包和签名校验，再替换输出；检测到输出路径正在运行时拒绝替换。仍应先正常退出旧实例，避免运行中 bundle 被外部修改。
 
 ## 界面文案与国际化
 
