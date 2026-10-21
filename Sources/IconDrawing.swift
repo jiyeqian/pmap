@@ -73,15 +73,21 @@ func drawPmapGlyph(size: CGFloat, ringColor: NSColor, dotColor: NSColor) {
     NSBezierPath(ovalIn: circleRect(cx: g.dotCX * s, cy: g.dotCY * s, r: g.dotR * s)).fill()
 }
 
-/// App 图标：深灰黑背景 + 白环白竖笔 + 绿色圆点（macOS 会自动裁圆角）
+/// App 图标：深灰黑 squircle 背景 + 白环白竖笔 + 绿色圆点
+/// macOS 11+ 图标规范：圆角（squircle）由图标自身绘制，系统不再自动裁；
+/// 圆角矩形近似半径 = 22.37% 边长（Apple squircle 等效值），圆角外为透明。
 func pmapAppIcon(size: CGFloat = 1024) -> NSImage {
     let image = NSImage(size: NSSize(width: size, height: size))
     image.lockFocus()
     defer { image.unlockFocus() }
 
-    let ctx = NSGraphicsContext.current!.cgContext
+    let rect = CGRect(x: 0, y: 0, width: size, height: size)
+    let squircle = NSBezierPath(roundedRect: rect,
+                                xRadius: size * 0.2237,
+                                yRadius: size * 0.2237)
     PmapColors.bg.setFill()
-    ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
+    squircle.fill()
+    squircle.addClip()   // glyph 裁剪在 squircle 内，圆角外透明
 
     drawPmapGlyph(size: size, ringColor: .white, dotColor: PmapColors.green)
     return image
