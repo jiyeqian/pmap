@@ -53,6 +53,16 @@ struct Config: Codable {
     var active: [Int]? = nil
     /// 从面板移除的主机（仅面板层隐藏，绝不修改 ~/.ssh/config）
     var hiddenHosts: [String]? = nil
+    /// 界面语言（"zh" / "en"）；老配置无此键时按系统语言判定
+    var lang: String? = nil
+}
+
+/// 输入框错误类型（结构化存储，渲染时按语言翻译）
+enum InputIssue: Equatable {
+    /// 格式不对（提示仍显示 port/port:port 格式说明）
+    case badFormat
+    /// 本地端口已被映射
+    case duplicatedPort
 }
 
 /// `ssh -G <host>` 展开出的连接参数

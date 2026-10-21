@@ -78,3 +78,12 @@ git log --oneline -20
 ```
 
 > 注意：`build.sh` 会删除并重建 `pmap.app`。请先退出正在运行的 pmap，否则运行中实例的 bundle 会失效，导致状态栏图标消失。
+
+## 界面文案与国际化
+
+- 所有界面文案集中在 `Sources/I18n.swift` 的 `L10n` 查表中（`zh` / `en` 两张表，键为 `L10n.Key`）。**不要在视图或逻辑层硬编码中英文案**，一律通过 `store.t(.key)` 或 `L10n.text(.key, lang)` 取值。
+- 新增文案时必须同时补齐中英两表；`Tests/I18nTests.swift` 会校验「每个键在两种语言下都有非空条目」，漏译会导致测试失败。
+- 带参数的文案用 `{0}`、`{1}` 占位符，中英模板占位符数量与顺序必须一致。
+- 错误信息一律以结构化枚举（`Sources/PortError.swift` 的 `PortError`）保存，**不要把渲染好的字符串存进状态**：这样切换语言时已有错误才会即时变成新语言。`PortError.classify` 负责把 OpenSSH 英文原文归类，描述在渲染时翻译。
+- 调试与自检输出（`--snapshot` / `--render` / `--list-hosts`、调试窗口标题）保持中文原文，不纳入双语范围。
+- 开发期可用 `--lang zh|en` 配合 `--snapshot` / `--render` 渲染指定语言做目检。

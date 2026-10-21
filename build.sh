@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 APP_NAME="pmap"
 VERSION="${PMAP_VERSION:-v0.1.4}"   # ← 版本号：优先取环境变量 PMAP_VERSION（CI 传入 tag 名），否则用默认值
-BUILD_DIR=".build"
+BUILD_DIR=".build-app"   # 独立目录：避免与 SPM 的 .build / test.sh 的 .build-tests 互相覆盖
 APP="${APP_NAME}.app"
 BIN="${BUILD_DIR}/${APP_NAME}-univ"
 

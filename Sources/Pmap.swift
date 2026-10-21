@@ -75,21 +75,21 @@ enum Tunnel {
         _ = Shell.ssh(controlArgs(host) + ["-O", "exit", host])
     }
 
-    static func ensureConnection(host: String) -> String? {
+    static func ensureConnection(host: String) -> PortError? {
         if check(host: host) { return nil }
         // 用 -M 显式建立主连接（ControlMaster 由 controlArgs 统一为 auto，-M 强制作为 master）。
         // 不再依赖 ssh config 的 ControlPersist。
         let (code, err) = Shell.ssh(controlArgs(host) + ["-f", "-N", host])
-        if code != 0 { return clean(err) }
+        if code != 0 { return PortError.classify(clean(err), localPort: 0) }
         for _ in 0..<20 {
             if check(host: host) { return nil }
             Thread.sleep(forTimeInterval: 0.15)
         }
-        return "SSH 连接建立超时"
+        return .sshConnectTimeout
     }
 
     private static func clean(_ s: String) -> String {
-        s.split(separator: "\n").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? "未知错误"
+        s.split(separator: "\n").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
     }
 }
 
@@ -102,10 +102,12 @@ final class Store: ObservableObject {
     @Published var activeHost: String?                  // 当前已连接（绿）的主机
     @Published var active: Set<Int> = []                // 已开启的本地端口
     @Published var adhoc: [Rule] = []                   // 临时端口
-    @Published var errors: [Int: String] = [:]          // 端口 -> 错误
+    @Published var errors: [Int: PortError] = [:]       // 端口 -> 结构化错误（渲染时翻译）
     @Published var busy = false
     @Published var quickInput = ""
-    @Published var inputInvalid: String? = nil          // 万能输入错误提示（非空则输入框红显）
+    @Published var inputInvalid: InputIssue? = nil      // 万能输入错误提示（非空则输入框红显）
+    /// 界面语言（可由底部按钮切换，写入配置持久化）
+    @Published private(set) var lang: Lang = Lang.system
 
     @Published var hostAliases: [String] = []
     private var heartbeatTask: Task<Void, Never>?       // 断线检测心跳（仅连接成功后运行）
@@ -131,9 +133,32 @@ final class Store: ObservableObject {
            let c = try? JSONDecoder().decode(Config.self, from: d) {
             config = c
         }
+        // 语言：配置优先；无配置则按系统语言（zh* → 中文，否则英文）
+        lang = config.lang.flatMap(Lang.init(rawValue:)) ?? Lang.system
         adhoc = config.adhoc ?? []
         active = Set(config.active ?? [])     // 恢复端口开启状态
         refreshHosts()
+    }
+
+    /// 切换界面语言：立即生效并写入配置（下次启动沿用）
+    /// persist = false 时仅本次生效，不写盘（供开发期快照指定语言使用）
+    func setLang(_ l: Lang, persist: Bool = true) {
+        guard l != lang else { return }
+        lang = l
+        if persist {
+            config.lang = l.rawValue
+            save()
+        }
+    }
+
+    /// 切换到另一种语言（底部按钮点击即切换）
+    func toggleLang() {
+        setLang(lang.other)
+    }
+
+    /// 查表取当前语言的文案（视图层统一走这里，切语言自动刷新）
+    func t(_ key: L10n.Key) -> String {
+        L10n.text(key, lang)
     }
 
     func save() {
@@ -206,7 +231,7 @@ final class Store: ObservableObject {
         if active.contains(r.local) { return .green }
         return .gray
     }
-    func error(_ r: Rule) -> String? { errors[r.local] }
+    func error(_ r: Rule) -> PortError? { errors[r.local] }
 
     var onCount: Int { allRules.filter { active.contains($0.local) }.count }
 
@@ -276,8 +301,8 @@ final class Store: ObservableObject {
                 if !alive {
                     // 首次发现断线：发通知
                     if !wasDown {
-                        Notifier.post(title: "pmap 连接断开",
-                                      body: "主机 \(host) 已断开，正在自动重连…")
+                        Notifier.post(title: self.t(.notifyDisconnected),
+                                      body: L10n.text(.notifyReconnectBody, self.lang, host))
                         wasDown = true
                     }
                     // 断线：保留 active（记住哪些端口该开），自动重连并恢复
@@ -293,8 +318,8 @@ final class Store: ObservableObject {
                         await self.attemptForward(host: host, r)
                     }
                     // 重连成功：发通知
-                    Notifier.post(title: "pmap 已重连",
-                                  body: "主机 \(host) 连接已恢复，\(toRestore.count) 个端口转发已重建")
+                    Notifier.post(title: self.t(.notifyReconnected),
+                                  body: L10n.text(.notifyReconnectedBody, self.lang, host, toRestore.count))
                     wasDown = false
                 } else {
                     wasDown = false
@@ -328,8 +353,8 @@ final class Store: ObservableObject {
                 for r in toRestore {
                     await self.attemptForward(host: host, r)
                 }
-                Notifier.post(title: "pmap 已重连",
-                              body: "主机 \(host) 连接已恢复，\(toRestore.count) 个端口转发已重建")
+                Notifier.post(title: self.t(.notifyReconnected),
+                              body: L10n.text(.notifyReconnectedBody, self.lang, host, toRestore.count))
                 self.startHeartbeat(host: host)
                 break
             }
@@ -355,10 +380,10 @@ final class Store: ObservableObject {
     /// 主机状态文字（下拉框标题）
     func hostStatusText(_ alias: String) -> String {
         switch hostState[alias] ?? .off {
-        case .off: return "断开"
-        case .connecting: return "连接中…"
-        case .on: return "连通"
-        case .failed: return "故障"
+        case .off: return t(.hostOff)
+        case .connecting: return t(.hostConnecting)
+        case .on: return t(.hostOn)
+        case .failed: return t(.hostFailed)
         }
     }
 
@@ -391,13 +416,13 @@ final class Store: ObservableObject {
         }.value
 
         if let busyBy = result.busyBy {
-            errors[r.local] = "本地 \(r.local) 被 \(busyBy) 占用"
+            errors[r.local] = .localPortBusy(port: r.local, by: (busyBy == "unknown") ? nil : busyBy)
             pendingRetry.insert(r.local)
             startPortRetry()
             return false
         }
         if let e = result.fwdErr {
-            errors[r.local] = e
+            errors[r.local] = PortError.classify(e, localPort: r.local)
             pendingRetry.insert(r.local)
             startPortRetry()
             return false
@@ -452,8 +477,8 @@ final class Store: ObservableObject {
                 }
 
                 if recovered > 0 {
-                    Notifier.post(title: "pmap 端口已恢复",
-                                  body: "\(recovered) 个端口转发已自动恢复")
+                    Notifier.post(title: self.t(.notifyPortsRestored),
+                                  body: L10n.text(.notifyPortsRestoredBody, self.lang, recovered))
                 }
                 if self.pendingRetry.isEmpty { break }
                 if anyFailed {
@@ -473,14 +498,14 @@ final class Store: ObservableObject {
         guard let (rule, _) = parseQuickInput(quickInput) else {
             // 格式错误：清空输入，输入框内红色高亮格式提示
             quickInput = ""
-            inputInvalid = usageHint
+            inputInvalid = .badFormat
             return
         }
         // 本地端口冲突检查：local 不能重复（远端可重复）
         let samePort = { (r: Rule) in r.local == rule.local }
         if adhoc.contains(where: samePort) || config.groups.flatMap(\.rules).contains(where: samePort) {
             quickInput = ""
-            inputInvalid = "本地端口已映射"
+            inputInvalid = .duplicatedPort
             return
         }
         adhoc.append(rule)
@@ -547,14 +572,16 @@ extension View {
 struct Chip: View {
     let rule: Rule
     let light: PortLight
-    let err: String?
+    let err: PortError?
+    let lang: Lang
     let action: () -> Void
     let remove: () -> Void
     @State private var hovering = false
 
+    /// 提示语：错误优先，其次是「单击开关」动作提示（二选一）
     private var hint: String {
-        if let e = err { return e }
-        return light == .green ? "单击关闭" : "单击开启"
+        if let e = err { return e.description(lang) }
+        return L10n.text(light == .green ? .clickToStop : .clickToStart, lang)
     }
 
     var body: some View {
@@ -584,7 +611,7 @@ struct Chip: View {
                     .foregroundStyle(hovering ? .secondary : .tertiary)
             }
             .buttonStyle(.plain)
-            .help("删除端口")
+            .help(L10n.text(.deletePort, lang))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -612,13 +639,14 @@ struct MenuPanel: View {
 
             // 端口（单列；小圆点三色 + 单色文字；单击开关，双击删除）
             if store.allRules.isEmpty {
-                Text("在下方输入端口添加")
+                Text(store.t(.emptyPorts))
                     .font(.system(size: 11)).foregroundStyle(.tertiary)
                     .padding(.horizontal, 12).padding(.vertical, 10)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(store.allRules) { r in
                         Chip(rule: r, light: store.portLight(r), err: store.error(r),
+                             lang: store.lang,
                              action: { store.toggle(r) },
                              remove: { store.removeRuleAnywhere(r) })
                     }
@@ -630,7 +658,7 @@ struct MenuPanel: View {
             HStack(spacing: 6) {
                 Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
-                          prompt: Text(store.inputInvalid ?? usageHint)
+                          prompt: Text(inputPrompt)
                               .font(.system(size: 11, design: .monospaced))
                               .foregroundColor(store.inputInvalid != nil ? .red : .secondary))
                     .textFieldStyle(.plain)
@@ -651,7 +679,7 @@ struct MenuPanel: View {
 
             Divider()
 
-            // 底部栏：左=版本号（点击打开项目主页）｜中=预留中英切换｜右=退出
+            // 底部栏：左=版本号（点击打开项目主页）｜中=语言切换｜右=退出
             HStack(spacing: 6) {
                 // 左：版本号（appVersion 已带 v 前缀）
                 Button {
@@ -664,14 +692,20 @@ struct MenuPanel: View {
                 }
                 .buttonStyle(.plain)
                 .hoverText()
-                .help("打开项目主页")
+                .help(store.t(.openHomepage))
 
                 Spacer(minLength: 0)
 
-                // 中：预留中英语切换（后续 i18n 落地时原地替换为切换控件）
-                Text("中 / EN")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.quaternary)
+                // 中：语言切换（显示当前语言，点击即切换到另一种）
+                Button {
+                    store.toggleLang()
+                } label: {
+                    Text(store.lang.tag)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .hoverText()
+                .help(L10n.switchHint(store.lang))
 
                 Spacer(minLength: 0)
 
@@ -679,18 +713,32 @@ struct MenuPanel: View {
                 Button {
                     NSApplication.shared.terminate(nil)
                 } label: {
-                    Text("Quit")
+                    Text(store.t(.quit))
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
                 .hoverText()
-                .help("退出 pmap")
+                .help(store.t(.quitHelp))
             }
             .padding(.horizontal, 12)
             .padding(.top, 7)
             .padding(.bottom, 13)
         }
-        .frame(width: 180)
+        .frame(width: panelWidth)
+    }
+
+    /// 面板宽度：英文文案更长，按语言自适应
+    private var panelWidth: CGFloat {
+        store.lang == .zh ? 180 : 200
+    }
+
+    /// 输入框占位符：错误类型决定显示内容（格式错误仍显示格式说明）
+    private var inputPrompt: String {
+        switch store.inputInvalid {
+        case .badFormat: return usageHint
+        case .duplicatedPort: return store.t(.inputDuplicated)
+        case nil: return usageHint
+        }
     }
 
     private var appVersion: String {
@@ -703,7 +751,7 @@ struct MenuPanel: View {
         Menu {
             // 未读到 ~/.ssh/config 或无可用主机时给出提示
             if store.visibleHosts.isEmpty {
-                Text("未在 ~/.ssh/config 中找到可用主机")
+                Text(store.t(.noHostsInConfig))
             }
             ForEach(store.visibleHosts, id: \.self) { alias in
                 Button {
@@ -718,7 +766,7 @@ struct MenuPanel: View {
             }
         } label: {
             HStack(spacing: 6) {
-                Text(store.visibleHosts.isEmpty ? "无可用主机" : (store.activeHost ?? "选择主机"))
+                Text(store.visibleHosts.isEmpty ? store.t(.noHosts) : (store.activeHost ?? store.t(.selectHost)))
                     .font(.system(size: 12))
                     .foregroundStyle(hostStatusColor)
                     .lineLimit(1)
@@ -792,6 +840,7 @@ enum Snapshot {
 /// 万能输入框占位文字探针：与真实输入行同布局、同样式，但用纯 Text 代替
 /// TextField（后者无法被 ImageRenderer 渲染），用于目检占位文字是否完整显示
 struct PromptProbe: View {
+    var width: CGFloat = 180
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
@@ -804,7 +853,7 @@ struct PromptProbe: View {
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .frame(width: 180)
+        .frame(width: width)
     }
 }
 
@@ -822,6 +871,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panel: PanelWindow?
     private var countObserver: AnyCancellable?
+    private var langObserver: AnyCancellable?
     private var appearanceObserver: NSKeyValueObservation?
     private var eventMonitors: [Any] = []
     private var carouselTimer: Timer?        // 状态栏圆点轮播计时器
@@ -856,6 +906,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.refreshStatusIcon()
             }
 
+        // 语言切换：面板宽度按语言自适应（zh 180 / en 200），切换后即时调整
+        langObserver = store.$lang
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.resizePanelToFit()
+                }
+            }
+
         // 系统深浅色外观切换时刷新前景色（状态栏非 template，需手动适配）
         // AppKit 无 appearance 变化通知，官方推荐 KVO 观察 NSApplication.effectiveAppearance
         appearanceObserver = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
@@ -874,7 +934,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.level = .statusBar
         p.isMovableByWindowBackground = false
         p.isReleasedWhenClosed = false
-        let content = NSHostingView(rootView: MenuPanel(store: store).frame(width: 180))
+        let content = NSHostingView(rootView: MenuPanel(store: store))
+        content.autoresizingMask = [.width, .height]
         content.wantsLayer = true
         content.layer?.cornerRadius = 12
         content.layer?.masksToBounds = true
@@ -962,10 +1023,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             closePanel()
             return
         }
-        // 尺寸随内容自适应
+        // 尺寸随内容自适应（宽度由语言决定：zh 180 / en 200）
         let fit = panel.contentView?.fittingSize ?? NSSize(width: 180, height: 200)
         var frame = panel.frame
-        frame.size = NSSize(width: 180, height: max(fit.height, 100))
+        frame.size = NSSize(width: fit.width > 0 ? fit.width : 180, height: max(fit.height, 100))
         // 左边缘对齐状态栏图标左边缘；面板顶部贴住菜单栏下方
         frame.origin.x = iconWin.frame.minX
         let screen = iconWin.screen ?? NSScreen.main!
@@ -977,6 +1038,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setFrame(frame, display: true)
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// 语言切换后按新宽度即时调整面板（保持贴菜单栏、贴图标左边缘、不越出屏幕右缘）
+    private func resizePanelToFit() {
+        guard let panel, panel.isVisible,
+              let btn = statusItem?.button, let iconWin = btn.window else { return }
+        let fit = panel.contentView?.fittingSize ?? NSSize(width: 180, height: 200)
+        var frame = panel.frame
+        frame.size = NSSize(width: fit.width > 0 ? fit.width : frame.width, height: max(fit.height, 100))
+        frame.origin.x = iconWin.frame.minX
+        let screen = iconWin.screen ?? NSScreen.main!
+        frame.origin.y = screen.visibleFrame.maxY - frame.height - 5
+        if frame.maxX > screen.visibleFrame.maxX {
+            frame.origin.x = screen.visibleFrame.maxX - frame.width
+        }
+        panel.setFrame(frame, display: true)
     }
 
     private func closePanel() {
@@ -1012,15 +1089,22 @@ struct PmapApp: App {
             for h in hosts { print("  " + h) }
             exit(0)
         }
-        // 离屏渲染面板，用于开发期目检布局：--snapshot <输出路径>
+        // 离屏渲染面板，用于开发期目检布局：--snapshot <输出路径> [--lang zh|en]
         if let i = CommandLine.arguments.firstIndex(of: "--snapshot"),
            i + 1 < CommandLine.arguments.count {
             let out = CommandLine.arguments[i + 1]
-            Snapshot.write(MenuPanel(store: Store()), to: out + ".png")
+            let store = Store()
+            // 开发期可指定语言渲染（不写盘）
+            if let li = CommandLine.arguments.firstIndex(of: "--lang"),
+               li + 1 < CommandLine.arguments.count,
+               let l = Lang(rawValue: CommandLine.arguments[li + 1]) {
+                store.setLang(l, persist: false)
+            }
+            Snapshot.write(MenuPanel(store: store), to: out + ".png")
             // 附：占位文字探针。ImageRenderer 渲染不了 TextField（输出占位符），
             // 用与 prompt 完全相同的字体/颜色/lineLimit/minimumScaleFactor 和
             // 相同的行布局渲染一份纯 Text 替身，用于跨 SDK 目检占位是否被截断。
-            Snapshot.write(PromptProbe(), to: out + "-prompt.png")
+            Snapshot.write(PromptProbe(width: store.lang == .zh ? 180 : 200), to: out + "-prompt.png")
             exit(0)
         }
         // 真实渲染导出（非 ImageRenderer）：在深色窗口里用真实 AppKit 渲染面板，
@@ -1028,6 +1112,12 @@ struct PmapApp: App {
         if let i = CommandLine.arguments.firstIndex(of: "--render"),
            i + 1 < CommandLine.arguments.count {
             let out = CommandLine.arguments[i + 1]
+            // 开发期可指定语言渲染（不写盘）
+            if let li = CommandLine.arguments.firstIndex(of: "--lang"),
+               li + 1 < CommandLine.arguments.count,
+               let l = Lang(rawValue: CommandLine.arguments[li + 1]) {
+                Store.shared?.setLang(l, persist: false)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 700),
                                    styleMask: [.titled],
