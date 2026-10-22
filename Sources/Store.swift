@@ -14,6 +14,7 @@ final class Store: ObservableObject {
     @Published var hostError: PortError?
     @Published var storageIssue = false
     @Published var accessIssue = false
+    @Published private(set) var configIssue: ConfigReadIssue?
     @Published var quickInput = ""
     @Published var inputInvalid: InputIssue?
     @Published private(set) var lang = Lang.system
@@ -31,10 +32,12 @@ final class Store: ObservableObject {
     private let url: URL
     private let factory: @Sendable (String, String) -> any TunnelBackend
     private let retryDelay: Duration
+    private let scansConfiguration: Bool
 
     init(url: URL = AppPaths.config, scanHosts: Bool = true, retryDelay: Duration = .seconds(3),
          factory: @escaping @Sendable (String, String) -> any TunnelBackend = { SSHSession(host: $0, configPath: $1) }) {
         self.url = url
+        self.scansConfiguration = scanHosts
         self.factory = factory
         self.retryDelay = retryDelay
         do { config = try ConfigurationFile.load(url) }
@@ -51,8 +54,22 @@ final class Store: ObservableObject {
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
     var onCount: Int { active.count }
     var sshDirectory: URL { URL(fileURLWithPath: config.sshDirectory ?? AppPaths.sshHome.appendingPathComponent(".ssh").path) }
-    var sshConfigPath: String { sshDirectory.appendingPathComponent("config").path }
-    var canConnect: Bool { config.trustedConfig && !accessIssue && configReadable }
+    var configurationURL: URL {
+        URL(fileURLWithPath: config.sshConfigFile ?? sshDirectory.appendingPathComponent("config").path).standardizedFileURL
+    }
+    var sshConfigPath: String { configurationURL.path }
+    var canConnect: Bool { config.trustedConfig && configIssue == nil && configReadable }
+    var hasErrors: Bool { storageIssue || configIssue != nil || hostError != nil || !errors.isEmpty }
+    func refreshOnOpen() { if scansConfiguration { refreshHosts() } }
+    func selectConfiguration(_ file: URL) {
+        disconnect()
+        config.sshConfigFile = file.standardizedFileURL.path
+        config.sshDirectory = nil
+        config.trustedConfig = false
+        grantAccess([file], sshFolder: false)
+    }
+    func confirmConfigurationTrust() { config.trustedConfig = true; save() }
+
 
     func t(_ key: L10n.Key) -> String { L10n.text(key, lang) }
     func setLang(_ value: Lang, persist: Bool = true) {
@@ -68,12 +85,22 @@ final class Store: ObservableObject {
         catch { storageIssue = true }
     }
     func refreshHosts() {
+        if AppPaths.isSandboxed && scopedURLs.isEmpty {
+            configIssue = .access(configurationURL.resolvingSymlinksInPath())
+            accessIssue = true
+            hostAliases = []
+            return
+        }
         do {
-            let result = try SSHConfig.readHosts(at: sshDirectory.appendingPathComponent("config"))
-            hostAliases = result
-            if !AppPaths.isSandboxed { accessIssue = false }
-            for host in result where hostState[host] == nil { hostState[host] = .off }
-        } catch { accessIssue = true; hostAliases = [] }
+            hostAliases = try SSHConfig.readHosts(at: configurationURL)
+            configIssue = nil
+            accessIssue = false
+            for host in hostAliases where hostState[host] == nil { hostState[host] = .off }
+        } catch {
+            configIssue = (error as? ConfigReadIssue) ?? .invalid(configurationURL)
+            accessIssue = true
+            hostAliases = []
+        }
     }
     private func restoreAccess() {
         guard AppPaths.isSandboxed else { return }
@@ -120,7 +147,10 @@ final class Store: ObservableObject {
             accessIssue = false
             save()
             refreshHosts()
-        } catch { accessIssue = true }
+        } catch {
+            accessIssue = true
+            configIssue = .access(targets.first ?? configurationURL)
+        }
     }
     var redactedDiagnostics: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
@@ -128,17 +158,21 @@ final class Store: ObservableObject {
     }
     func revokeAccess() {
         disconnect()
+        // Clear state immediately; delayed cleanup must not revoke a newly selected file.
+        let oldSessions = Array(sessions.values)
+        let oldURLs = scopedURLs
+        scopedURLs.removeAll()
+        config.bookmarks.removeAll()
+        config.sshDirectory = nil
+        config.sshConfigFile = nil
+        config.trustedConfig = false
+        accessIssue = AppPaths.isSandboxed
+        configIssue = AppPaths.isSandboxed ? .access(configurationURL) : nil
+        hostAliases.removeAll()
+        save()
         Task {
-            let all = Array(sessions.values)
-            for backend in all { await backend.shutdown() }
-            for target in scopedURLs { target.stopAccessingSecurityScopedResource() }
-            scopedURLs.removeAll()
-            config.bookmarks.removeAll()
-            config.sshDirectory = nil
-            config.trustedConfig = false
-            accessIssue = AppPaths.isSandboxed
-            hostAliases.removeAll()
-            save()
+            for backend in oldSessions { await backend.shutdown() }
+            for target in oldURLs { target.stopAccessingSecurityScopedResource() }
         }
     }
     func autoConnectIfNeeded() {
@@ -222,7 +256,7 @@ final class Store: ObservableObject {
     }
     static func retryable(_ error: PortError) -> Bool {
         switch error {
-        case .authFailed, .tooManyAuthFailures, .hostKeyRejected, .forwardingNotAllowed, .handshakeFailed: false
+        case .authFailed, .fileAccess, .tooManyAuthFailures, .hostKeyRejected, .forwardingNotAllowed, .handshakeFailed: false
         default: true
         }
     }

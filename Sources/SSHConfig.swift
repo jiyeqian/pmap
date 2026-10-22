@@ -1,6 +1,29 @@
 import Foundation
 import Darwin
 
+enum ConfigReadIssue: Error, Equatable {
+    case access(URL), missing(URL), invalid(URL)
+    var target: URL {
+        switch self { case .access(let url), .missing(let url), .invalid(let url): url }
+    }
+    var needsAccess: Bool { if case .access = self { true } else { false } }
+    func description(_ lang: Lang) -> String {
+        let key: L10n.Key = switch self {
+        case .access: .configNeedsAccess
+        case .missing: .configMissing
+        case .invalid: .configUnreadable
+        }
+        return L10n.text(key, lang, target.lastPathComponent)
+    }
+    static func classify(_ error: Error, at file: URL) -> ConfigReadIssue {
+        let target = file.resolvingSymlinksInPath()
+        let code = (error as NSError).code
+        if code == NSFileReadNoPermissionError || code == Int(EACCES) || code == Int(EPERM) { return .access(target) }
+        if code == NSFileReadNoSuchFileError || code == Int(ENOENT) { return .missing(target) }
+        return .invalid(target)
+    }
+}
+
 enum SSHConfig {
     static func isSafeAlias(_ name: String) -> Bool {
         !name.isEmpty && !name.hasPrefix("-") && !name.contains(where: { $0.isWhitespace || $0.isNewline || "/*?!%\\\"'".contains($0) })
@@ -47,9 +70,12 @@ enum SSHConfig {
             guard depth < 16, visited.count < 256 else { throw CocoaError(.fileReadTooLarge) }
             let path = url.standardizedFileURL.path
             guard visited.insert(path).inserted else { return }
-            let attributes = try FileManager.default.attributesOfItem(atPath: path)
-            guard (attributes[.size] as? NSNumber)?.intValue ?? 0 < 1_048_576 else { throw CocoaError(.fileReadTooLarge) }
-            let text = try String(contentsOfFile: path, encoding: .utf8)
+            let text: String
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: path)
+                guard (attributes[.size] as? NSNumber)?.intValue ?? 0 < 1_048_576 else { throw CocoaError(.fileReadTooLarge) }
+                text = try String(contentsOfFile: path, encoding: .utf8)
+            } catch { throw ConfigReadIssue.classify(error, at: url) }
             for line in text.components(separatedBy: .newlines) {
                 let parts = tokens(line)
                 guard let key = parts.first?.lowercased() else { continue }
@@ -60,10 +86,10 @@ enum SSHConfig {
                         let expanded = pattern.hasPrefix("~/") ? AppPaths.sshHome.path + String(pattern.dropFirst()) : pattern
                         let absolute = expanded.hasPrefix("/") ? expanded : AppPaths.sshHome.appendingPathComponent(".ssh/" + expanded).path
                         var matches = glob_t()
-                        let status = glob(absolute, 0, nil, &matches)
+                        let status = glob(absolute, GLOB_ERR, nil, &matches)
                         defer { globfree(&matches) }
                         if status == GLOB_NOMATCH { continue }
-                        guard status == 0 else { throw CocoaError(.fileReadUnknown) }
+                        guard status == 0 else { throw ConfigReadIssue.access(URL(fileURLWithPath: absolute).deletingLastPathComponent()) }
                         if let paths = matches.gl_pathv {
                             for index in 0..<Int(matches.gl_pathc) {
                                 if let entry = paths[index] { try read(URL(fileURLWithPath: String(cString: entry)), depth: depth + 1) }

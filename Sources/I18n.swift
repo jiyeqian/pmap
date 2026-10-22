@@ -33,6 +33,24 @@ enum L10n {
     /// 全部文案键。`CaseIterable` 用于单测校验「每个键都翻译齐了」。
     enum Key: String, CaseIterable {
 
+        case done
+        case chooseConfig
+        case options
+        case about
+        case help
+        case authorize
+        case configNeedsAccess
+        case configMissing
+        case configUnreadable
+        case resetAccess
+        case resetTitle
+        case resetBody
+        case resetConfirm
+        case connectConfirm
+        case helpBody
+        case noHostsFound
+        case copySSHCommand
+
         case connectionLost
         case settings
         case disconnect
@@ -118,30 +136,48 @@ enum L10n {
     }
 
     private static let zh: [Key: String] = [
+        .done: "好",
+        .chooseConfig: "选择配置…",
+        .options: "选项",
+        .about: "关于 pmap",
+        .help: "使用帮助",
+        .authorize: "授权…",
+        .configNeedsAccess: "需要授权：{0}",
+        .configMissing: "找不到配置：{0}",
+        .configUnreadable: "无法读取：{0}",
+        .resetAccess: "重置授权…",
+        .resetTitle: "重置授权？",
+        .resetBody: "将断开连接并清除授权记录，不删除任何文件。",
+        .resetConfirm: "重置",
+        .connectConfirm: "信任并连接",
+        .helpBody: "选择配置，选择主机，再输入端口。首次主机验证和密钥解锁请在终端完成。",
+        .noHostsFound: "配置中没有具体主机",
+        .copySSHCommand: "终端验证…",
+
         .connectionLost: "连接已断开；请查看主机状态。",
         .settings: "设置与帮助",
-        .disconnect: "断开并停止重试",
+        .disconnect: "断开",
         .refreshHosts: "刷新主机列表",
         .setupNeeded: "首次使用：先在设置中授权 SSH 配置。",
         .setupTitle: "系统 SSH 配置",
         .setupGuide: "先在终端确认 ssh 主机别名 可以登录。pmap 使用系统 OpenSSH 和现有密钥，以非交互方式运行。首次主机指纹确认、密码及密钥解锁请在终端完成。",
-        .configTrust: "信任并使用此 SSH 配置…",
+        .configTrust: "信任此配置？",
         .configTrusted: "已授权使用 SSH 配置",
-        .configTrustBody: "SSH 配置中的 ProxyCommand 和 Match exec 可能运行程序；LocalCommand、Agent/X11 转发及配置内端口映射会被禁用。仅授权你信任的配置。沙盒中仍可能因外部文件或 SSH Agent 权限而失败。",
+        .configTrustBody: "配置可能运行本机命令。请只使用可信配置。",
         .confirm: "确认授权",
         .cancelAction: "取消",
         .selectSSHFolder: "选择 .ssh 文件夹…",
-        .grantResources: "授权额外文件或文件夹…",
+        .grantResources: "授权文件…",
         .disconnectBeforeAccess: "修改文件授权前请先断开连接。",
         .accessIssue: "SSH 文件不可读或授权已失效，请在设置中重新授权。",
-        .storageIssue: "配置读取或保存失败。请检查权限；损坏的原文件不会被覆盖。",
-        .restoreOnLaunch: "启动时恢复上次连接与端口",
-        .autoReconnect: "自动重连并重试失败端口",
+        .storageIssue: "配置读写失败",
+        .restoreOnLaunch: "启动时恢复",
+        .autoReconnect: "自动重连",
         .notificationsSetting: "连接中断时通知我",
         .behavior: "连接行为",
         .privacy: "隐私政策",
         .copyDiagnostics: "复制脱敏诊断",
-        .privacyText: "pmap 连接你指定的 SSH 服务器，不含广告、统计或开发者遥测。主机配置、端口与文件授权保存在本机。私钥不被复制到应用配置；系统 SSH 读取你授权的原文件。主机指纹必须先由你确认，pmap 不自动信任新主机。通知不显示主机名或地址。点击项目主页会打开浏览器。撤销访问可使用下方按钮；它不会删除原 SSH 文件。",
+        .privacyText: "pmap 只连接你指定的 SSH 服务器，不向开发者发送数据。配置和授权记录保存在本机，不复制私钥。主机指纹由你核验。“重置授权”清除授权记录，不删除原文件。",
         .revokeAccess: "撤销文件访问与配置信任",
         .forwardStatus: "转发已建立；未检测远端服务健康",
         .portStopped: "已停止",
@@ -198,30 +234,48 @@ enum L10n {
     ]
 
     private static let en: [Key: String] = [
+        .done: "OK",
+        .chooseConfig: "Choose Configuration…",
+        .options: "Options",
+        .about: "About pmap",
+        .help: "Help",
+        .authorize: "Allow Access…",
+        .configNeedsAccess: "Access needed: {0}",
+        .configMissing: "Configuration missing: {0}",
+        .configUnreadable: "Cannot read: {0}",
+        .resetAccess: "Reset Access…",
+        .resetTitle: "Reset access?",
+        .resetBody: "Disconnect and forget saved access. No files are deleted.",
+        .resetConfirm: "Reset",
+        .connectConfirm: "Trust & Connect",
+        .helpBody: "Choose a configuration, select a host, then enter a port. Verify new hosts and unlock keys in Terminal.",
+        .noHostsFound: "No explicit hosts in configuration",
+        .copySSHCommand: "Verify in Terminal…",
+
         .connectionLost: "Connection lost. Check the host status.",
         .settings: "Settings & Help",
-        .disconnect: "Disconnect & Stop Retrying",
+        .disconnect: "Disconnect",
         .refreshHosts: "Refresh Hosts",
         .setupNeeded: "First use: authorize your SSH configuration in Settings.",
         .setupTitle: "System SSH Configuration",
         .setupGuide: "First verify that ssh host-alias works in Terminal. pmap uses system OpenSSH and existing keys without an interactive terminal. Verify new host fingerprints and unlock keys in Terminal.",
-        .configTrust: "Trust and Use This SSH Configuration…",
+        .configTrust: "Trust this configuration?",
         .configTrusted: "SSH configuration authorized",
-        .configTrustBody: "ProxyCommand and Match exec in SSH configuration may execute programs. LocalCommand, agent/X11 forwarding, and configured port forwards are disabled. Only authorize trusted configuration. External files and SSH Agent access may still fail in the sandbox.",
+        .configTrustBody: "Configuration may run local commands. Only use configuration you trust.",
         .confirm: "Authorize",
         .cancelAction: "Cancel",
         .selectSSHFolder: "Select .ssh Folder…",
-        .grantResources: "Authorize Additional Files or Folders…",
+        .grantResources: "Authorize Files…",
         .disconnectBeforeAccess: "Disconnect before changing file access.",
         .accessIssue: "SSH files are unavailable or access has expired. Reauthorize in Settings.",
-        .storageIssue: "Configuration could not be read or saved. Check permissions; a damaged original is never overwritten.",
-        .restoreOnLaunch: "Restore Connection and Ports on Launch",
-        .autoReconnect: "Reconnect and Retry Failed Ports",
+        .storageIssue: "Configuration error",
+        .restoreOnLaunch: "Restore on Launch",
+        .autoReconnect: "Auto Reconnect",
         .notificationsSetting: "Notify Me When a Connection Drops",
         .behavior: "Connection Behavior",
         .privacy: "Privacy Policy",
         .copyDiagnostics: "Copy Redacted Diagnostics",
-        .privacyText: "pmap connects to SSH servers you specify. It contains no advertising, analytics, or developer telemetry. Configuration, ports, and file permissions are stored locally. Private keys are not copied into app configuration; system SSH reads authorized original files. You must verify host fingerprints first; pmap never automatically trusts new hosts. Notifications omit host names and addresses. Opening the project homepage launches a browser. Revoke access below without deleting original SSH files.",
+        .privacyText: "pmap connects only to SSH servers you specify and sends no data to the developer. Configuration and access records stay on your Mac; private keys are not copied. You verify host fingerprints. Reset Access forgets saved permissions without deleting original files.",
         .revokeAccess: "Revoke File Access and Configuration Trust",
         .forwardStatus: "Forward established; remote service health is not checked",
         .portStopped: "Stopped",

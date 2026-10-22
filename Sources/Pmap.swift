@@ -111,208 +111,155 @@ struct Chip: View {
 
 struct MenuPanel: View {
     @ObservedObject var store: Store
-    @FocusState var inputFocused: Bool
-    @Environment(\.openSettings) private var openSettings
+    @FocusState private var inputFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 第一项：主机下拉菜单（选中即连接）；顶部留白更大
-            hostMenu
-                .padding(.horizontal, 10)
-                .padding(.top, 14)
-                .padding(.bottom, 12)
+            SwiftUI.Group {
+                if store.visibleHosts.isEmpty {
+                    Button(store.t(.chooseConfig)) { PanelActions.chooseConfiguration(store) }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(store.configIssue?.target.path ?? store.configurationURL.path)
+                } else { hostMenu }
+            }
+            .font(.system(size: 12))
+            .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 12)
 
-            if let host = store.activeHost {
-                Text(store.hostStatusText(host))
-                    .font(.caption).foregroundStyle(.secondary)
-                    .padding(.horizontal, 12).padding(.bottom, 8)
-            }
-            if !store.canConnect {
-                Button(store.t(store.accessIssue ? .accessIssue : .setupNeeded)) { openSettings() }
-                    .font(.caption).padding(.horizontal, 12).padding(.bottom, 8)
-            }
-            if store.storageIssue {
-                Text(store.t(.storageIssue)).font(.caption).foregroundStyle(.red).padding(.horizontal, 12)
-            }
-            if let error = store.hostError {
-                Text(error.description(store.lang)).font(.caption).foregroundStyle(.red)
-                    .textSelection(.enabled).padding(.horizontal, 12).padding(.bottom, 8)
-            }
+            issueRow
             Divider()
-
-            // 端口（单列；小圆点三色 + 单色文字；单击开关，双击删除）
             if store.allRules.isEmpty {
                 Text(store.t(.emptyPorts))
                     .font(.system(size: 11)).foregroundStyle(.tertiary)
                     .padding(.horizontal, 12).padding(.vertical, 10)
             } else {
                 ScrollView {
-                  VStack(alignment: .leading, spacing: 0) {
-                    ForEach(store.allRules) { r in
-                        Chip(rule: r, light: store.portLight(r), desired: store.desired.contains(r.local),
-                             pending: store.pending.contains(r.local), err: store.error(r),
-                             lang: store.lang,
-                             action: { store.toggle(r) },
-                             remove: { store.removeRuleAnywhere(r) })
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(store.allRules) { rule in
+                            Chip(rule: rule, light: store.portLight(rule), desired: store.desired.contains(rule.local),
+                                 pending: store.pending.contains(rule.local), err: store.error(rule), lang: store.lang,
+                                 action: { store.toggle(rule) }, remove: { store.removeRuleAnywhere(rule) })
+                        }
                     }
                 }
-                  }
-                .frame(height: min(CGFloat(store.allRules.count) * 32 + 8, 280))
+                .frame(height: min(CGFloat(store.allRules.count) * 28, 280))
                 .padding(.vertical, 4)
             }
-
-            // 万能输入框（唯一入口；格式/冲突错误仅文字红显）
             HStack(spacing: 6) {
                 Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
-                          prompt: Text(inputPrompt)
-                              .font(.system(size: 11, design: .monospaced))
-                              .foregroundColor(store.inputInvalid != nil ? .red : .secondary))
+                          prompt: Text(inputPrompt).font(.system(size: 11, design: .monospaced)))
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .monospaced))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
                     .foregroundStyle(store.inputInvalid != nil ? Color.red : Color.primary)
                     .focused($inputFocused)
                     .accessibilityLabel(store.t(.portInput))
                     .onSubmit { store.commitQuick() }
-                    .onChange(of: store.quickInput) { _, nv in
-                        if !nv.isEmpty { store.inputInvalid = nil }
-                    }
+                    .onChange(of: store.quickInput) { _, value in if !value.isEmpty { store.inputInvalid = nil } }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
             .padding(.horizontal, 10).padding(.vertical, 8)
-            .onAppear { inputFocused = true }
-
             Divider()
-
-            // 底部栏：左=版本号（点击打开项目主页）｜中=语言切换｜右=退出
-            HStack(spacing: 6) {
-                // 左：版本号（appVersion 已带 v 前缀）
-                Button {
-                    if let url = URL(string: "https://github.com/jiyeqian/pmap") {
-                        NSWorkspace.shared.open(url)
-                    }
-                } label: {
-                    Text(appVersion)
-                        .font(.system(size: 11, design: .monospaced))
-                }
-                .buttonStyle(.plain)
-                .hoverText()
-                .help(store.t(.openHomepage))
-
+            HStack(spacing: 8) {
+                PanelAbout(store: store, version: appVersion)
                 Spacer(minLength: 0)
-
-                Button { openSettings() } label: { Image(systemName: "gearshape") }
-                    .buttonStyle(.plain)
-                    .help(store.t(.settings))
-                    .accessibilityLabel(store.t(.settings))
-
-                // 中：语言切换（显示当前语言，点击即切换到另一种）
-                Button {
-                    store.toggleLang()
-                } label: {
-                    Text(store.lang.tag)
-                        .font(.system(size: 11, weight: .medium))
+                PanelOptions(store: store)
+                Button { store.toggleLang() } label: {
+                    Image(systemName: "globe").frame(width: 20, height: 20)
                 }
-                .buttonStyle(.plain)
-                .hoverText()
                 .help(L10n.switchHint(store.lang))
-
-                Spacer(minLength: 0)
-
-                // 右：退出
-                Button {
-                    NSApplication.shared.terminate(nil)
-                } label: {
-                    Text(store.t(.quit))
-                        .font(.system(size: 11))
+                .accessibilityLabel(L10n.switchHint(store.lang))
+                Button { NSApp.terminate(nil) } label: {
+                    Image(systemName: "power").frame(width: 20, height: 20)
                 }
-                .buttonStyle(.plain)
-                .hoverText()
                 .help(store.t(.quitHelp))
+                .accessibilityLabel(store.t(.quit))
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 7)
-            .padding(.bottom, 13)
+            .font(.system(size: 11))
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12).padding(.top, 7).padding(.bottom, 10)
         }
-        .frame(width: panelWidth)
+        .frame(width: store.lang == .zh ? 220 : 240)
+        .onAppear { inputFocused = true; store.refreshOnOpen() }
     }
 
-    /// 面板宽度：英文文案更长，按语言自适应
-    private var panelWidth: CGFloat {
-        store.lang == .zh ? 280 : 320
+    @ViewBuilder private var issueRow: some View {
+        if store.storageIssue {
+            issueText(store.t(.storageIssue))
+        } else if let issue = store.configIssue,
+                  store.config.sshConfigFile != nil || !store.config.bookmarks.isEmpty || !AppPaths.isSandboxed {
+            HStack(spacing: 6) {
+                Text(issue.description(store.lang)).lineLimit(1).help(issue.target.path)
+                Spacer(minLength: 0)
+                if issue.needsAccess {
+                    Button(store.t(.authorize)) { PanelActions.authorize(store, target: issue.target) }
+                        .buttonStyle(.plain)
+                }
+            }
+            .font(.system(size: 11)).foregroundStyle(.red)
+            .padding(.horizontal, 12).padding(.bottom, 8)
+        } else if let error = store.hostError {
+            HStack(spacing: 6) {
+                Text(error.description(store.lang)).lineLimit(1).help(error.description(store.lang))
+                Spacer(minLength: 0)
+                if case .fileAccess(let path) = error {
+                    Button(store.t(.authorize)) { PanelActions.authorize(store, target: URL(fileURLWithPath: path)) }
+                } else if error == .authFailed || error == .hostKeyRejected {
+                    Menu {
+                        Button(store.t(.copySSHCommand)) { PanelActions.verifyInTerminal(store) }
+                        Button(store.t(.grantResources)) { PanelActions.authorize(store) }
+                    } label: { Image(systemName: "key") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .help(error.description(store.lang)).accessibilityLabel(error.description(store.lang))
+                } else {
+                    Button { PanelActions.verifyInTerminal(store) } label: { Image(systemName: "terminal") }
+                        .help(store.t(.copySSHCommand)).accessibilityLabel(store.t(.copySSHCommand))
+                }
+            }
+            .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.red)
+            .padding(.horizontal, 12).padding(.bottom, 8)
+        } else if store.visibleHosts.isEmpty, store.configIssue == nil {
+            issueText(store.t(.noHostsFound))
+        }
     }
-
-    /// 输入框占位符：错误类型决定显示内容（格式错误仍显示格式说明）
+    private func issueText(_ text: String) -> some View {
+        Text(text).font(.system(size: 11)).foregroundStyle(.secondary)
+            .lineLimit(1).help(text).padding(.horizontal, 12).padding(.bottom, 8)
+    }
     private var inputPrompt: String {
-        switch store.inputInvalid {
-        case .badFormat: return usageHint
-        case .duplicatedPort: return store.t(.inputDuplicated)
-        case nil: return usageHint
-        }
+        store.inputInvalid == .duplicatedPort ? store.t(.inputDuplicated) : usageHint
     }
-
     private var appVersion: String {
-        // 优先读 Info.plist；读不到则用编译期注入的 __PMAP_VERSION__ 兜底
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "__PMAP_VERSION__"
     }
-
-    /// 主机下拉框：标题显示当前状态文字（断开/连接中…/连通/故障），选中即连接
     private var hostMenu: some View {
         Menu {
-            // 未读到 ~/.ssh/config 或无可用主机时给出提示
-            if store.visibleHosts.isEmpty {
-                Text(store.t(.noHostsInConfig))
-            }
             if store.activeHost != nil {
                 Button(store.t(.disconnect)) { store.disconnect() }
                 Divider()
             }
-            Button(store.t(.refreshHosts)) { store.refreshHosts() }
-            ForEach(store.visibleHosts, id: \.self) { alias in
-                Button {
-                    store.selectHost(alias)
-                } label: {
-                    if store.activeHost == alias {
-                        Label(alias, systemImage: "checkmark")
-                    } else {
-                        Text(alias)
-                    }
+            ForEach(store.visibleHosts, id: \.self) { host in
+                Button { PanelActions.connect(host, store: store) } label: {
+                    if store.activeHost == host { Label(host, systemImage: "checkmark") }
+                    else { Text(host) }
                 }
             }
         } label: {
-            HStack(spacing: 6) {
-                Text(store.visibleHosts.isEmpty ? store.t(.noHosts) : (store.activeHost ?? store.t(.selectHost)))
-                    .font(.system(size: 12))
-                    .foregroundStyle(hostStatusColor)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer()
-                Text(store.activeHost.map { store.hostStatusText($0) } ?? "")
-                    .font(.system(size: 11))
-                    .foregroundStyle(hostStatusColor)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .contentShape(Rectangle())
-            .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
+            Text(store.activeHost.map { "\($0) · \(store.hostStatusText($0))" } ?? store.t(.selectHost))
+                .font(.system(size: 12)).foregroundStyle(hostStatusColor)
+                .lineLimit(1).truncationMode(.middle)
         }
-        .disabled(!store.canConnect)
         .menuStyle(.borderlessButton)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
-
     private var hostStatusColor: Color {
-        guard let h = store.activeHost else { return Color(nsColor: .systemGray) }
-        switch store.hostState[h] ?? .off {
-        case .off: return Color(nsColor: .systemGray)
-        case .connecting: return Color(nsColor: .systemGray)
+        guard let host = store.activeHost else { return .primary }
+        switch store.hostState[host] ?? .off {
         case .on: return .green
         case .failed: return .red
+        default: return .secondary
         }
     }
 }
@@ -541,6 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             closePanel()
             return
         }
+        Store.shared?.refreshOnOpen()
         // 尺寸随内容自适应（宽度由语言决定：zh 180 / en 200）
         let fit = panel.contentView?.fittingSize ?? NSSize(width: 180, height: 200)
         var frame = panel.frame
@@ -666,9 +614,7 @@ struct PmapApp: App {
                                    backing: .buffered, defer: false)
                 win.title = "pmap render"
                 win.appearance = NSAppearance(named: .darkAqua)
-                let root = CommandLine.arguments.contains("--settings")
-                    ? AnyView(SettingsView(store: Store.shared!)) : AnyView(MenuPanel(store: Store.shared!))
-                let host = NSHostingView(rootView: root)
+                let host = NSHostingView(rootView: MenuPanel(store: Store.shared!))
                 win.contentView = host
                 win.center()
                 win.makeKeyAndOrderFront(nil)
@@ -706,8 +652,7 @@ struct PmapApp: App {
     }
 
     var body: some Scene {
-        Settings {
-            if let store = Store.shared { SettingsView(store: store) }
-        }   // 仅作场景占位，UI 全部由 AppDelegate 管理
+        Settings { EmptyView() }
+            .commands { CommandGroup(replacing: .appSettings) {} }
     }
 }

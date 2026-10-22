@@ -13,6 +13,7 @@ enum PortError: Equatable, Sendable {
     case forwardingNotAllowed
     /// 认证失败
     case authFailed
+    case fileAccess(path: String)
     /// 认证尝试次数过多
     case tooManyAuthFailures
     /// 连接被拒绝
@@ -44,6 +45,14 @@ enum PortError: Equatable, Sendable {
         let s = raw.lowercased()
         func has(_ keys: [String]) -> Bool { keys.contains { s.contains($0) } }
 
+        if has(["permission denied", "operation not permitted"]) {
+            if let start = raw.range(of: "identity file ", options: .caseInsensitive), let end = raw.range(of: " not accessible", options: .caseInsensitive, range: start.upperBound..<raw.endIndex) {
+                return .fileAccess(path: String(raw[start.upperBound..<end.lowerBound]))
+            }
+            if let start = raw.range(of: "Load key \"", options: .caseInsensitive), let end = raw.range(of: "\"", range: start.upperBound..<raw.endIndex) {
+                return .fileAccess(path: String(raw[start.upperBound..<end.lowerBound]))
+            }
+        }
         // 1. 本地端口被占用
         if has(["address already in use", "cannot listen to port",
                 "bind: ", "bind [", "bind:0", "address in use"]) {
@@ -103,6 +112,8 @@ enum PortError: Equatable, Sendable {
             return L10n.text(.errPortBusy, lang, port, name)
         case .forwardingNotAllowed:
             return L10n.text(.errForwardNotAllowed, lang)
+        case .fileAccess(let path):
+            return L10n.text(.configNeedsAccess, lang, URL(fileURLWithPath: path).lastPathComponent)
         case .authFailed:
             return L10n.text(.errAuthFailed, lang)
         case .tooManyAuthFailures:

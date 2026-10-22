@@ -59,11 +59,12 @@ struct Config: Codable {
     var trustedConfig = false
     var bookmarks: [Data] = []
     var sshDirectory: String? = nil
+    var sshConfigFile: String? = nil
 
     init() {}
     enum CodingKeys: String, CodingKey {
         case schemaVersion, host, groups, adhoc, active, hiddenHosts, lang
-        case restoreOnLaunch, autoReconnect, notifications, trustedConfig, bookmarks, sshDirectory
+        case restoreOnLaunch, autoReconnect, notifications, trustedConfig, bookmarks, sshDirectory, sshConfigFile
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -80,6 +81,7 @@ struct Config: Codable {
         trustedConfig = try c.decodeIfPresent(Bool.self, forKey: .trustedConfig) ?? false
         bookmarks = try c.decodeIfPresent([Data].self, forKey: .bookmarks) ?? []
         sshDirectory = try c.decodeIfPresent(String.self, forKey: .sshDirectory)
+        sshConfigFile = try c.decodeIfPresent(String.self, forKey: .sshConfigFile)
     }
 }
 

@@ -19,3 +19,5 @@ config.json
 pmap-sandbox.app/
 .build-store/
 pmap-probe.app/
+
+.build-minimal/
