@@ -161,7 +161,7 @@ enum PanelActions {
     }
 
     private static func showDialog(title: String, text: String, close: String, confirm: String? = nil) -> Bool {
-        let panel = InformationPanel(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        let panel = InformationPanel(contentRect: .zero, styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.isReleasedWhenClosed = false
@@ -178,14 +178,26 @@ enum PanelActions {
         body.isSelectable = true
         heading.alignment = .left
         body.alignment = .left
-        let words = NSStackView(views: [heading, body])
-        words.orientation = .vertical
-        words.alignment = .leading
-        words.spacing = 12
-        let row = NSStackView(views: [icon, words])
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.spacing = 20
+        let textWidth: CGFloat = 256
+        heading.preferredMaxLayoutWidth = textWidth
+        body.preferredMaxLayoutWidth = textWidth
+        let screenHeight = (NSApp.keyWindow?.screen ?? NSScreen.main)?.visibleFrame.height ?? 800
+        let maximumHeight = min(600, screenHeight - 48)
+        let headingHeight = ceil(heading.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: textWidth, height: 1000)).height)
+        let bodyHeight = ceil(body.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: textWidth, height: .greatestFiniteMagnitude)).height)
+        let maximumBodyHeight = max(80, maximumHeight - (48 + headingHeight / 2 + 12 + 64))
+        let bodyView: NSView
+        if bodyHeight > maximumBodyHeight {
+            let scroll = NSScrollView()
+            scroll.hasVerticalScroller = true
+            scroll.autohidesScrollers = true
+            scroll.drawsBackground = false
+            body.frame = NSRect(x: 0, y: 0, width: textWidth, height: bodyHeight)
+            scroll.documentView = body
+            bodyView = scroll
+        } else {
+            bodyView = body
+        }
         let buttons = NSStackView()
         buttons.orientation = .horizontal
         buttons.spacing = 8
@@ -198,22 +210,27 @@ enum PanelActions {
             button.bezelStyle = .rounded
             buttons.addArrangedSubview(button)
         }
-        for view in [row, buttons] {
+        for view in [icon, heading, bodyView, buttons] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
         NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(equalToConstant: 368),
             icon.widthAnchor.constraint(equalToConstant: 64),
             icon.heightAnchor.constraint(equalToConstant: 64),
-            words.widthAnchor.constraint(equalToConstant: 380),
-            heading.widthAnchor.constraint(equalTo: words.widthAnchor),
-            body.widthAnchor.constraint(equalTo: words.widthAnchor),
-            row.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            row.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
-            row.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
-            buttons.topAnchor.constraint(equalTo: row.bottomAnchor, constant: 24),
-            buttons.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            buttons.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
+            icon.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
+            icon.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            heading.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 16),
+            heading.widthAnchor.constraint(equalToConstant: textWidth),
+            heading.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            bodyView.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            bodyView.widthAnchor.constraint(equalToConstant: textWidth),
+            bodyView.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 12),
+            bodyView.heightAnchor.constraint(equalToConstant: min(bodyHeight, maximumBodyHeight)),
+            buttons.topAnchor.constraint(equalTo: bodyView.bottomAnchor, constant: 24),
+            buttons.topAnchor.constraint(greaterThanOrEqualTo: icon.bottomAnchor, constant: 16),
+            buttons.trailingAnchor.constraint(equalTo: bodyView.trailingAnchor),
+            buttons.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
         ])
         root.layoutSubtreeIfNeeded()
         panel.setContentSize(root.fittingSize)
