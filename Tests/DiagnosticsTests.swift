@@ -9,6 +9,21 @@ struct DiagnosticsTests {
         Store(url: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json"), scanHosts: false)
     }
 
+    @Test("运行信息以版本和紧凑状态两段显示")
+    func compactLayout() {
+        let s = store()
+        s.config.trustedConfig = true
+        let report = s.redactedDiagnostics
+        let paragraphs = report.components(separatedBy: "\n\n")
+        #expect(paragraphs.count == 2)
+        #expect(paragraphs[0].hasPrefix("pmap Version "))
+        #expect(paragraphs[0].contains("\nmacOS Version "))
+        #expect(paragraphs[1].contains("Diagnostics format: 3; Sandbox:"))
+        #expect(paragraphs[1].contains("; Host state:"))
+        s.hostError = .timedOut
+        #expect(s.redactedDiagnostics.components(separatedBy: "\n\n").count == 2)
+    }
+
     @Test("主机失败不会被正常的文件和存储状态掩盖")
     func hostKeyFailure() {
         let s = store()

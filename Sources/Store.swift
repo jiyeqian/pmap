@@ -296,8 +296,8 @@ final class Store: ObservableObject {
         else if requiresSSHFolderAuthorization { status = "ssh_folder_access_required" }
         else if !config.trustedConfig { status = "configuration_trust_required" }
         else { status = "idle" }
-        var lines = ["pmap \(version) (build \(build))", "Diagnostics format: 3",
-                     "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)", "Sandbox: \(AppPaths.isSandboxed)",
+        let versions = "pmap Version \(version) (build \(build))\nmacOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
+        var fields = ["Diagnostics format: 3", "Sandbox: \(AppPaths.isSandboxed)",
                      "Status: \(status)", "Host state: \(state)", "Host error: \(hostError?.diagnosticCode ?? "none")",
                      "Configuration error: \(configurationError)", "SSH folder authorized: \(folderAuthorized)",
                      "Known hosts error: \(knownHostsIssue?.diagnosticCode ?? "none")", "Configuration trusted: \(config.trustedConfig)",
@@ -333,10 +333,9 @@ final class Store: ObservableObject {
             actions.append(text("主机故障但缺少错误类别：重新选择主机重试，并检查界面或终端验证的具体错误。", "Host failed without an error category. Reselect it and inspect the UI or Terminal error."))
         }
         if !actions.isEmpty {
-            lines += ["", text("恢复步骤：", "Recovery steps:")]
-            lines += actions.enumerated().map { "\($0.offset + 1). \($0.element)" }
+            fields.append(text("恢复步骤：", "Recovery steps:") + " " + actions.joined(separator: " "))
         }
-        return lines.joined(separator: "\n") + "\n"
+        return versions + "\n\n" + fields.joined(separator: "; ") + "\n"
     }
     func revokeAccess() {
         disconnect()
