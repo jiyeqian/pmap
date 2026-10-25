@@ -296,7 +296,7 @@ final class Store: ObservableObject {
         else if requiresSSHFolderAuthorization { status = "ssh_folder_access_required" }
         else if !config.trustedConfig { status = "configuration_trust_required" }
         else { status = "idle" }
-        let versions = "pmap Version \(version) (build \(build))\nmacOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
+        let versions = "pmap Version \(version) (Build \(build))\nmacOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
         var fields = ["Diagnostics format: 3", "Sandbox: \(AppPaths.isSandboxed)",
                      "Status: \(status)", "Host state: \(state)", "Host error: \(hostError?.diagnosticCode ?? "none")",
                      "Configuration error: \(configurationError)", "SSH folder authorized: \(folderAuthorized)",

@@ -17,6 +17,7 @@ struct DiagnosticsTests {
         let paragraphs = report.components(separatedBy: "\n\n")
         #expect(paragraphs.count == 2)
         #expect(paragraphs[0].hasPrefix("pmap Version "))
+        #expect(paragraphs[0].contains(" (Build "))
         #expect(paragraphs[0].contains("\nmacOS Version "))
         #expect(paragraphs[1].contains("Diagnostics format: 3; Sandbox:"))
         #expect(paragraphs[1].contains("; Host state:"))
