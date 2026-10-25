@@ -185,14 +185,8 @@ struct MenuPanel: View {
             .padding(.horizontal, 10).padding(.vertical, 8)
             Divider()
             HStack(spacing: 8) {
-                PanelAbout(store: store, version: appVersion)
-                Spacer(minLength: 0)
                 PanelOptions(store: store)
-                Button { store.toggleLang() } label: {
-                    Image(systemName: "globe").frame(width: 20, height: 20)
-                }
-                .help(L10n.switchHint(store.lang))
-                .accessibilityLabel(L10n.switchHint(store.lang))
+                Spacer(minLength: 0)
                 Button { NSApp.terminate(nil) } label: {
                     Image(systemName: "power").frame(width: 20, height: 20)
                 }
@@ -256,9 +250,6 @@ struct MenuPanel: View {
     }
     private var inputPrompt: String {
         store.inputInvalid?.description(store.lang) ?? usageHint
-    }
-    private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "__PMAP_VERSION__"
     }
     private var hostMenu: some View {
         Menu {

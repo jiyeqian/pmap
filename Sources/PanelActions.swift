@@ -178,58 +178,50 @@ enum PanelActions {
 
 struct PanelOptions: View {
     @ObservedObject var store: Store
-    private func preference(_ path: WritableKeyPath<Config, Bool>) -> Binding<Bool> {
-        Binding(get: { store.config[keyPath: path] }, set: {
-            store.config[keyPath: path] = $0
-            if path == \Config.autoReconnect { store.retryPreferenceChanged() }
-            store.save()
-        })
-    }
-    var body: some View {
-        Menu {
-            Button(store.t(.importLegacy)) { PanelActions.importLegacy(store) }
-            Divider()
-            Toggle(store.t(.restoreOnLaunch), isOn: preference(\Config.restoreOnLaunch))
-            Toggle(store.t(.autoReconnect), isOn: preference(\Config.autoReconnect))
-            Toggle(store.t(.notificationsSetting), isOn: Binding(get: { store.config.notifications }, set: { store.setNotifications($0) }))
-            Divider()
-            Button(store.t(.resetAccess)) { PanelActions.reset(store) }
-            if store.hasErrors {
-                Button(store.t(.copyDiagnostics)) { PanelActions.copyDiagnostics(store) }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .frame(width: 20, height: 20)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(store.t(.options))
-        .accessibilityLabel(store.t(.options))
-    }
-}
+    @State private var showingInformation = false
+    @State private var copied = false
 
-struct PanelAbout: View {
-    @ObservedObject var store: Store
-    let version: String
     var body: some View {
         Menu {
-            Button(store.t(.openHomepage)) {
+            Button(store.lang == .zh ? "English" : "简体中文") { store.toggleLang() }
+            Button(store.t(.resetAccess)) { PanelActions.reset(store) }
+            Divider()
+            Button(store.t(.runtimeInformation)) {
+                copied = false
+                DispatchQueue.main.async { showingInformation = true }
+            }
+            Button(store.t(.help)) {
                 NSWorkspace.shared.open(URL(string: "https://github.com/jiyeqian/pmap")!)
             }
-            Button(store.t(.help)) { PanelActions.show(.help, body: .helpBody, store: store) }
             Button(store.t(.privacy)) {
                 if let value = Bundle.main.object(forInfoDictionaryKey: "PmapPrivacyPolicyURL") as? String,
                    let url = URL(string: value), url.scheme == "https" { NSWorkspace.shared.open(url) }
                 else { PanelActions.show(.privacy, body: .privacyText, store: store) }
             }
         } label: {
-            Text(version).font(.system(size: 11, design: .monospaced))
+            Image(systemName: "ellipsis").frame(width: 20, height: 20)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help(store.t(.about))
-        .accessibilityLabel(store.t(.about) + " " + version)
+        .help(store.t(.options))
+        .accessibilityLabel(store.t(.options))
+        .popover(isPresented: $showingInformation) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(store.t(.runtimeInformation)).font(.headline)
+                ScrollView {
+                    Text(store.runtimeInformation)
+                        .font(.system(size: 12))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button(store.t(copied ? .informationCopied : .copyRuntimeInformation)) {
+                    PanelActions.copyDiagnostics(store)
+                    copied = true
+                }
+            }
+            .padding(16)
+            .frame(width: 340, height: 360)
+        }
     }
 }

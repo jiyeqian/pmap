@@ -90,6 +90,9 @@ enum L10n {
         case notificationsSetting
         case behavior
         case privacy
+        case runtimeInformation
+        case copyRuntimeInformation
+        case informationCopied
         case copyDiagnostics
         case privacyText
         case revokeAccess
@@ -180,9 +183,9 @@ enum L10n {
         .configNeedsAccess: "需要授权：{0}",
         .configMissing: "找不到配置：{0}",
         .configUnreadable: "无法读取：{0}",
-        .resetAccess: "撤销 SSH 访问…",
-        .resetTitle: "撤销 SSH 访问？",
-        .resetBody: "将断开连接并清除授权记录，不删除任何文件。",
+        .resetAccess: "撤销 SSH 文件夹授权",
+        .resetTitle: "撤销 SSH 文件夹授权？",
+        .resetBody: "将断开当前主机及端口转发，清除 SSH 文件夹和关联文件的访问授权与配置信任，不删除任何文件。",
         .resetConfirm: "撤销",
         .connectConfirm: "信任并连接",
         .helpBody: "授权 .ssh 文件夹，选择主机，输入端口或端口:端口；可加 #备注。请在终端验证主机并解锁密钥。",
@@ -211,8 +214,11 @@ enum L10n {
         .notificationsSetting: "连接状态通知",
         .behavior: "连接行为",
         .privacy: "隐私政策",
+        .runtimeInformation: "运行信息",
+        .copyRuntimeInformation: "复制运行信息",
+        .informationCopied: "已复制",
         .copyDiagnostics: "复制脱敏诊断",
-        .privacyText: "pmap 只连接你指定的 SSH 服务器，不向开发者发送数据。配置和授权记录保存在本机，不复制私钥。主机指纹由你核验。“撤销 SSH 访问”清除授权记录，不删除原文件。",
+        .privacyText: "pmap 只连接你指定的 SSH 服务器，不向开发者发送数据。配置和授权记录保存在本机，不复制私钥。主机指纹由你核验。“撤销 SSH 文件夹授权”清除授权记录，不删除原文件。",
         .revokeAccess: "撤销文件访问与配置信任",
         .forwardStatus: "转发已建立；未检测远端服务健康",
         .portStopped: "已停止",
@@ -296,7 +302,7 @@ enum L10n {
         .configNeedsAccess: "Access needed: {0}",
         .configMissing: "Configuration missing: {0}",
         .configUnreadable: "Cannot read: {0}",
-        .resetAccess: "Revoke SSH Access…",
+        .resetAccess: "Revoke SSH Folder Access",
         .resetTitle: "Revoke SSH access?",
         .resetBody: "Disconnect and forget saved access. No files are deleted.",
         .resetConfirm: "Revoke",
@@ -327,6 +333,9 @@ enum L10n {
         .notificationsSetting: "Connection Notifications",
         .behavior: "Connection Behavior",
         .privacy: "Privacy Policy",
+        .runtimeInformation: "Runtime Information",
+        .copyRuntimeInformation: "Copy Runtime Information",
+        .informationCopied: "Copied",
         .copyDiagnostics: "Copy Redacted Diagnostics",
         .privacyText: "pmap connects only to SSH servers you specify and sends no data to the developer. Configuration and access records stay on your Mac; private keys are not copied. You verify host fingerprints. Revoke SSH Access forgets saved permissions without deleting original files.",
         .revokeAccess: "Revoke File Access and Configuration Trust",

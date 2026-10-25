@@ -132,7 +132,23 @@ struct RestoreCompatibilityTests {
         #expect(try Data(contentsOf: target) == before)
     }
 
-    @Test("通知由用户开启，断开、重连与端口恢复分别发送")
+    @Test("升级后恢复、重连和通知统一启用")
+    func automaticBehaviorOnUpgrade() throws {
+        let path = try directory()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let url = path.appendingPathComponent("state.json")
+        var previous = Config()
+        previous.restoreOnLaunch = false
+        previous.autoReconnect = false
+        previous.notifications = false
+        try ConfigurationFile.save(previous, to: url)
+        let store = Store(url: url, scanHosts: false)
+        #expect(store.config.restoreOnLaunch)
+        #expect(store.config.autoReconnect)
+        #expect(store.config.notifications)
+    }
+
+    @Test("通知默认启用，断开、重连与端口恢复分别发送")
     func notifications() async throws {
         let path = try directory()
         defer { try? FileManager.default.removeItem(at: path) }
@@ -146,7 +162,7 @@ struct RestoreCompatibilityTests {
         store.config.trustedConfig = true
         store.hostAliases = ["saved"]
         store.adhoc = [Rule(local: 3080, remote: 80)]
-        #expect(!store.config.notifications)
+        #expect(store.config.notifications)
         #expect(requests == 0)
         store.setNotifications(true)
         #expect(requests == 1)

@@ -58,6 +58,9 @@ final class Store: ObservableObject {
         self.requestNotifications = requestNotifications
         do { config = try ConfigurationFile.load(url) }
         catch { storageIssue = true; configReadable = false }
+        config.restoreOnLaunch = true
+        config.autoReconnect = true
+        config.notifications = true
         lang = config.lang.flatMap(Lang.init(rawValue:)) ?? .system
         adhoc = config.adhoc ?? []
         desired = Set(config.active ?? []).intersection(Set(allRules.map(\.local)))
@@ -166,7 +169,9 @@ final class Store: ObservableObject {
         save()
     }
     private func notify(_ notice: ConnectionNotice) {
-        if config.notifications { sendNotice(notice, lang) }
+        if config.notifications {
+            sendNotice(notice, lang)
+        }
     }
 
 
@@ -270,6 +275,33 @@ final class Store: ObservableObject {
             configIssue = .access(targets.first ?? configurationURL)
         }
     }
+    var runtimeInformation: String {
+        func text(_ zh: String, _ en: String) -> String { lang == .zh ? zh : en }
+        let state = activeHost.flatMap { hostState[$0] } ?? .off
+        let status: String
+        switch state {
+        case .off: status = text("未连接", "Disconnected")
+        case .connecting: status = text("连接中", "Connecting")
+        case .on: status = text("已连接", "Connected")
+        case .failed: status = text("连接故障", "Connection failed")
+        }
+        var lines = [String(redactedDiagnostics.split(separator: "\n").first ?? "pmap"),
+                     text("主机：", "Host: ") + status,
+                     text("可用主机：", "Available hosts: ") + String(visibleHosts.count),
+                     text("转发端口：", "Forwarded ports: ") + "\(active.count) / \(desired.count)"]
+        if storageIssue { lines.append(t(.storageIssue)) }
+        if let configMessage { lines.append(configMessage) }
+        if let knownHostsMessage { lines.append(knownHostsMessage) }
+        if let hostError { lines.append(hostError.recoverySteps(lang)) }
+        let uniqueErrors = Dictionary(grouping: errors.values, by: \.diagnosticCode)
+        for code in uniqueErrors.keys.sorted() {
+            if let error = uniqueErrors[code]?.first, code != hostError?.diagnosticCode {
+                lines.append(error.recoverySteps(lang))
+            }
+        }
+        return lines.joined(separator: "\n\n")
+    }
+
     var redactedDiagnostics: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development"

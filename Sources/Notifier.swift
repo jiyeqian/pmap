@@ -1,5 +1,5 @@
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 
 // MARK: - 系统通知
 
@@ -21,7 +21,7 @@ enum Notifier {
         }
     }
 
-    /// 申请通知授权（用户开启通知时调用）
+    /// 通知显示由系统授权控制。
     static func requestAuthorization() {
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -35,7 +35,10 @@ enum Notifier {
         content.sound = sound
         let request = UNNotificationRequest(identifier: UUID().uuidString,
                                             content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { allowed, _ in
+            if allowed { center.add(request) }
+        }
     }
 }
 
