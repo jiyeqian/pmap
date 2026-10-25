@@ -51,6 +51,11 @@ struct Chip: View {
     let lang: Lang
     let action: () -> Void
     let remove: () -> Void
+    var updateNote: (String) -> Void = { _ in }
+    var duplicate = false
+    @State private var editingNote = false
+    @State private var noteDraft = ""
+    @FocusState private var noteFocused: Bool
     @State private var hovering = false
 
     /// 提示语：错误优先，其次是「单击开关」动作提示（二选一）
@@ -67,21 +72,9 @@ struct Chip: View {
                 .frame(width: 10, height: 10)
                 .accessibilityHidden(true)
             Button(action: action) {
-                HStack(spacing: 7) {
-                    Text(rule.label)
-                        .font(.system(size: 12, design: .monospaced))
-                        .fixedSize(horizontal: true, vertical: false)
-                    if let note = rule.displayNote {
-                        Text(note)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                Text(rule.label)
+                    .font(.system(size: 12, design: .monospaced))
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.primary)
@@ -90,6 +83,32 @@ struct Chip: View {
             .accessibilityHint(hint)
             .disabled(pending && !desired)
             .help(rule.accessibleLabel + " · " + hint)
+            if editingNote {
+                TextField("", text: $noteDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+                    .focused($noteFocused)
+                    .onSubmit { finishNote() }
+                    .onExitCommand { editingNote = false; noteFocused = false }
+                    .onChange(of: noteFocused) { _, focused in if !focused && editingNote { finishNote() } }
+            } else {
+                Button {
+                    noteDraft = rule.displayNote ?? ""
+                    editingNote = true
+                    noteFocused = true
+                } label: {
+                    if let note = rule.displayNote {
+                        Text(note).lineLimit(1).truncationMode(.tail)
+                    } else {
+                        Image(systemName: "pencil").opacity(hovering ? 1 : 0)
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .accessibilityLabel(lang == .zh ? "编辑描述" : "Edit description")
+                .help(lang == .zh ? "编辑描述" : "Edit description")
+            }
             Spacer(minLength: 0)
             // 删除图标（单击删除）
             Button(action: remove) {
@@ -105,11 +124,18 @@ struct Chip: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 5)
-            .fill(hovering ? Color.primary.opacity(0.09) : Color.clear))
+            .fill(duplicate ? Color.accentColor.opacity(0.18) : (hovering ? Color.primary.opacity(0.09) : Color.clear)))
         .onHover { hovering = $0 }
         .contentShape(Rectangle())
         .help(hint)
     }
+    private func finishNote() {
+        guard editingNote else { return }
+        editingNote = false
+        updateNote(noteDraft)
+        noteFocused = false
+    }
+
 }
 
 struct MenuPanel: View {
@@ -121,7 +147,7 @@ struct MenuPanel: View {
             if store.requiresSSHFolderAuthorization { authorizationPanel }
             else { workingPanel }
         }
-        .frame(width: store.lang == .zh ? 220 : 240)
+        .frame(width: 220)
         .onAppear { store.refreshOnOpen() }
     }
 
@@ -158,7 +184,8 @@ struct MenuPanel: View {
                         ForEach(store.allRules) { rule in
                             Chip(rule: rule, light: store.portLight(rule), desired: store.desired.contains(rule.local),
                                  pending: store.pending.contains(rule.local), err: store.error(rule), lang: store.lang,
-                                 action: { store.toggle(rule) }, remove: { store.removeRuleAnywhere(rule) })
+                                 action: { store.toggle(rule) }, remove: { store.removeRuleAnywhere(rule) },
+                                 updateNote: { store.updateNote(rule, note: $0) }, duplicate: store.duplicatePort == rule.local)
                         }
                     }
                 }
@@ -168,17 +195,20 @@ struct MenuPanel: View {
             HStack(spacing: 6) {
                 Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
-                          prompt: Text(inputPrompt)
+                          prompt: Text("port/port:port")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(store.inputInvalid != nil ? .red : .secondary))
+                            .foregroundColor(.secondary))
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(store.inputInvalid != nil ? Color.red : Color.primary)
+                    .foregroundStyle(Color.primary)
                     .focused($inputFocused)
                     .accessibilityLabel(store.t(.portInput))
-                    .accessibilityValue(store.inputInvalid.map { $0.description(store.lang) } ?? store.quickInput)
+                    .accessibilityValue(store.quickInput)
                     .onSubmit { store.commitQuick() }
-                    .onChange(of: store.quickInput) { _, value in if !value.isEmpty { store.inputInvalid = nil } }
+                    .onChange(of: store.quickInput) { _, _ in store.inputInvalid = nil; store.duplicatePort = nil }
+                if store.inputInvalid == .badFormat {
+                    Text("port/port:port").font(.system(size: 11, design: .monospaced)).foregroundStyle(.red).fixedSize()
+                }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
@@ -247,9 +277,6 @@ struct MenuPanel: View {
     private func issueText(_ text: String) -> some View {
         Text(text).font(.system(size: 11)).foregroundStyle(.secondary)
             .lineLimit(1).help(text).padding(.horizontal, 12).padding(.bottom, 8)
-    }
-    private var inputPrompt: String {
-        store.inputInvalid?.description(store.lang) ?? usageHint
     }
     private var hostMenu: some View {
         Menu {

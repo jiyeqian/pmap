@@ -20,6 +20,7 @@ final class Store: ObservableObject {
     private var checkedKnownHosts: [URL] = []
     let sshRoot: URL
     @Published var quickInput = ""
+    @Published var duplicatePort: Int?
     @Published var inputInvalid: InputIssue?
     @Published private(set) var lang = Lang.system
     @Published var hostAliases: [String] = []
@@ -571,17 +572,29 @@ final class Store: ObservableObject {
         }
     }
     func commitQuick() {
+        duplicatePort = nil
         guard let (rule, _) = parseQuickInput(quickInput) else {
-            quickInput = ""; inputInvalid = .badFormat; return
+            inputInvalid = .badFormat; return
         }
         guard !allRules.contains(where: { $0.local == rule.local }) else {
-            quickInput = ""; inputInvalid = .duplicatedPort; return
+            duplicatePort = rule.local; inputInvalid = .duplicatedPort; return
         }
         adhoc.append(rule)
         quickInput = ""
         inputInvalid = nil
         save()
         if activeHost != nil { open(rule) }
+    }
+    func updateNote(_ rule: Rule, note: String) {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = trimmed.isEmpty ? nil : trimmed
+        for group in config.groups.indices {
+            for index in config.groups[group].rules.indices where config.groups[group].rules[index].local == rule.local {
+                config.groups[group].rules[index].note = value
+            }
+        }
+        for index in adhoc.indices where adhoc[index].local == rule.local { adhoc[index].note = value }
+        save()
     }
     func removeRuleAnywhere(_ rule: Rule) { close(rule, remove: true) }
     private func removeStoredRule(_ rule: Rule) {

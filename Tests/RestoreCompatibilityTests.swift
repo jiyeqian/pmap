@@ -28,6 +28,7 @@ struct RestoreCompatibilityTests {
             store.quickInput = value
             store.commitQuick()
             #expect(store.inputInvalid == .badFormat)
+            #expect(store.quickInput == value)
             #expect(store.adhoc.isEmpty)
             #expect(!store.inputInvalid!.description(.zh).isEmpty)
         }
@@ -39,9 +40,32 @@ struct RestoreCompatibilityTests {
         store.quickInput = "3080:80#duplicate"
         store.commitQuick()
         #expect(store.inputInvalid == .duplicatedPort)
+        #expect(store.duplicatePort == 3080)
         #expect(store.adhoc.count == 1)
         let restored = Store(url: url, scanHosts: false)
         #expect(restored.adhoc.first?.note == "deepseek")
+    }
+
+    @Test("描述编辑保存且不改变端口与连接状态")
+    func editNotes() throws {
+        let path = try directory()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let url = path.appendingPathComponent("state.json")
+        let store = Store(url: url, scanHosts: false)
+        let rule = Rule(local: 3080, remote: 80, note: "old")
+        store.adhoc = [rule]
+        store.config.groups = [Group(name: "group", rules: [Rule(local: 9000, remote: 90)])]
+        store.desired = [3080]
+        store.active = [3080]
+        store.updateNote(rule, note: " new ")
+        store.updateNote(store.config.groups[0].rules[0], note: "group note")
+        #expect(store.active == [3080])
+        #expect(store.desired == [3080])
+        let saved = try ConfigurationFile.load(url)
+        #expect(saved.adhoc?.first == Rule(local: 3080, remote: 80, note: "new"))
+        #expect(saved.groups[0].rules[0].note == "group note")
+        store.updateNote(rule, note: "  ")
+        #expect(store.adhoc[0].note == nil)
     }
 
     @Test("过滤含点、本机、多别名及 Include 中的本机定义")
