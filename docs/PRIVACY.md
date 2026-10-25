@@ -12,7 +12,7 @@ pmap 不自动信任新主机或接受主机密钥变化。首次连接与密钥
 
 通知由 macOS 在本机发送，默认关闭，不包含主机名或地址。打开项目主页会调用系统浏览器，后续访问适用该网站的隐私政策。
 
-可在主面板菜单选择“重置授权…”以清除保存的文件授权与配置信任；此操作不会删除原 SSH 文件。要删除应用数据，退出应用后删除其应用支持目录中的 Pmap 文件夹；沙盒构建的数据位于相应应用容器内。不要在公开问题中粘贴私钥、密码或未脱敏的配置。
+可在主面板菜单选择“撤销 SSH 访问…”以清除保存的文件授权与配置信任；此操作不会删除原 SSH 文件。要删除应用数据，退出应用后删除其应用支持目录中的 Pmap 文件夹；沙盒构建的数据位于相应应用容器内。不要在公开问题中粘贴私钥、密码或未脱敏的配置。
 
 隐私问题请通过项目的 [GitHub Issues](https://github.com/jiyeqian/pmap/issues) 联系维护者。正式商店提交前需要确认发布主体、支持联系渠道，并提供此政策的公开可访问 URL。
 
@@ -26,6 +26,6 @@ pmap never automatically trusts new hosts or accepts changed host keys. Verify h
 
 macOS notifications are local, off by default, and omit host names and addresses. Opening the project homepage launches your browser; the destination website's privacy policy applies.
 
-Reset saved file access and configuration trust from the main-panel menu without deleting original SSH files. To delete application data, quit pmap and remove its Pmap application-support folder; sandbox builds store data in their corresponding app container. Never post private keys, passwords, or unredacted configuration in public issues.
+Revoke saved SSH file access and configuration trust from the main-panel menu without deleting original SSH files. To delete application data, quit pmap and remove its Pmap application-support folder; sandbox builds store data in their corresponding app container. Never post private keys, passwords, or unredacted configuration in public issues.
 
 Contact maintainers through [GitHub Issues](https://github.com/jiyeqian/pmap/issues). Before store submission, confirm the publishing entity and support contact, and host this policy at a publicly accessible URL.

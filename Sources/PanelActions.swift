@@ -4,6 +4,7 @@ import AppKit
 @MainActor
 enum PanelActions {
     private static var presenting = false
+    static var restoreMainPanel: (@MainActor () -> Void)?
 
     // Native dialogs must start after SwiftUI's menu tracking has ended.
     private static func present(_ action: @escaping @MainActor () -> Void) {
@@ -16,37 +17,78 @@ enum PanelActions {
         }
     }
 
-    static func chooseConfiguration(_ store: Store) { present { chooseConfigurationNow(store) } }
+    static func chooseSSHDirectory(_ store: Store) { present { chooseSSHDirectoryNow(store) } }
     static func authorize(_ store: Store, target: URL? = nil) { present { authorizeNow(store, target: target) } }
     static func connect(_ host: String, store: Store) { present { connectNow(host, store: store) } }
     static func importLegacy(_ store: Store) { present { importLegacyNow(store) } }
     static func reset(_ store: Store) { present { resetNow(store) } }
     static func show(_ key: L10n.Key, body: L10n.Key, store: Store) { present { showNow(key, body: body, store: store) } }
 
-    private static func chooseConfigurationNow(_ store: Store) {
+    private static func chooseSSHDirectoryNow(_ store: Store) {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
         panel.showsHiddenFiles = true
-        panel.directoryURL = store.configurationURL.deletingLastPathComponent()
-        panel.message = store.t(.chooseConfig)
-        if panel.runModal() == .OK, let file = panel.url { store.selectConfiguration(file) }
+        panel.directoryURL = store.sshRoot
+        panel.prompt = store.t(.allowAccess)
+        panel.message = store.t(.authorizeSSHDirectory)
+        panel.begin { response in
+            panel.orderOut(nil)
+            guard response == .OK, let directory = panel.url else { restoreMainPanel?(); return }
+            guard store.selectSSHDirectory(directory) else {
+                message(store.t(.chooseSSHDirectoryOnly), store: store)
+                return
+            }
+            continueAuthorization(store, attempted: [])
+        }
     }
 
-    private static func authorizeNow(_ store: Store, target: URL?) {
+    static func continueAuthorization(_ store: Store, attempted: Set<URL> = []) {
+        if let request = store.supplementalAccess, !attempted.contains(request.target) {
+            authorizeNow(store, target: request.target, messageKey: request.message, attempted: attempted.union([request.target]))
+        } else if let message = store.configMessage {
+            self.message(message, store: store)
+        } else if let message = store.knownHostsMessage {
+            self.message(message, store: store)
+        } else { restoreMainPanel?() }
+    }
+
+    private static func authorizeNow(_ store: Store, target: URL?, messageKey: L10n.Key? = nil, attempted: Set<URL> = []) {
+        guard let requested = target ?? store.requiredFileAccess?.target else { return }
+        let target = SSHConfig.realTarget(requested)
         let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = target == nil
+        panel.canChooseFiles = !target.hasDirectoryPath
+        panel.canChooseDirectories = target.hasDirectoryPath
         panel.showsHiddenFiles = true
-        panel.directoryURL = target?.deletingLastPathComponent() ?? AppPaths.sshHome.appendingPathComponent(".ssh")
-        panel.message = store.t(.authorize)
-        if let target { panel.nameFieldStringValue = target.lastPathComponent }
-        guard panel.runModal() == .OK else { return }
-        let host = store.activeHost
-        store.disconnect(clearDesired: false)
-        store.grantAccess(panel.urls, sshFolder: false)
-        if let host, store.canConnect { store.selectHost(host, restore: true) }
+        panel.directoryURL = target.deletingLastPathComponent()
+        panel.nameFieldStringValue = target.lastPathComponent
+        panel.prompt = store.t(.allowAccess)
+        panel.message = store.t(messageKey ?? store.requiredFileAccess?.message ?? .authorize)
+        panel.begin { response in
+            panel.orderOut(nil)
+            guard response == .OK, let file = panel.url else { restoreMainPanel?(); return }
+            guard file.resolvingSymlinksInPath() == target else {
+                message(store.t(.authorize), store: store)
+                return
+            }
+            let host = store.activeHost
+            store.disconnect(clearDesired: false)
+            store.grantAccess([file], sshFolder: false)
+            if let host, store.canConnect { store.selectHost(host, restore: true) }
+            continueAuthorization(store, attempted: attempted.union([target]))
+        }
+    }
+
+    private static func message(_ text: String, store: Store) {
+        let alert = NSAlert()
+        alert.messageText = text
+        alert.addButton(withTitle: store.t(.done))
+        if let window = NSApp.keyWindow {
+            alert.beginSheetModal(for: window) { _ in alert.window.orderOut(nil); restoreMainPanel?() }
+        } else {
+            alert.runModal()
+            restoreMainPanel?()
+        }
     }
 
     private static func connectNow(_ host: String, store: Store) {
@@ -107,7 +149,7 @@ enum PanelActions {
         alert.informativeText = store.t(.resetBody)
         alert.addButton(withTitle: store.t(.resetConfirm))
         alert.addButton(withTitle: store.t(.cancelAction))
-        if alert.runModal() == .alertFirstButtonReturn { store.revokeAccess() }
+        if alert.runModal() == .alertFirstButtonReturn { store.revokeAccess(); restoreMainPanel?() }
     }
 
     private static func showNow(_ key: L10n.Key, body: L10n.Key, store: Store) {
@@ -119,7 +161,8 @@ enum PanelActions {
     }
 
     static func verifyInTerminal(_ store: Store) {
-        guard let host = store.activeHost, SSHConfig.isSafeAlias(host) else { return }
+        guard let host = store.activeHost ?? (store.visibleHosts.contains(store.config.host) ? store.config.host : store.visibleHosts.first),
+              SSHConfig.isSafeAlias(host) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString("ssh -F \(Shell.quoted(store.sshConfigPath)) -- \(Shell.quoted(host))", forType: .string)
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") {
@@ -144,7 +187,6 @@ struct PanelOptions: View {
     }
     var body: some View {
         Menu {
-            Button(store.t(.chooseConfig)) { PanelActions.chooseConfiguration(store) }
             Button(store.t(.importLegacy)) { PanelActions.importLegacy(store) }
             Divider()
             Toggle(store.t(.restoreOnLaunch), isOn: preference(\Config.restoreOnLaunch))

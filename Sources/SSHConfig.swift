@@ -6,6 +6,9 @@ enum ConfigReadIssue: Error, Equatable {
     var target: URL {
         switch self { case .access(let url), .missing(let url), .invalid(let url): url }
     }
+    var diagnosticCode: String {
+        switch self { case .access: "access_denied"; case .missing: "file_missing"; case .invalid: "unreadable_or_invalid" }
+    }
     var needsAccess: Bool { if case .access = self { true } else { false } }
     func description(_ lang: Lang) -> String {
         let key: L10n.Key = switch self {
@@ -16,15 +19,36 @@ enum ConfigReadIssue: Error, Equatable {
         return L10n.text(key, lang, target.lastPathComponent)
     }
     static func classify(_ error: Error, at file: URL) -> ConfigReadIssue {
-        let target = file.resolvingSymlinksInPath()
-        let code = (error as NSError).code
-        if code == NSFileReadNoPermissionError || code == Int(EACCES) || code == Int(EPERM) { return .access(target) }
-        if code == NSFileReadNoSuchFileError || code == Int(ENOENT) { return .missing(target) }
+        let target = SSHConfig.realTarget(file)
+        let value = error as NSError
+        if value.domain == NSPOSIXErrorDomain {
+            if [Int(EACCES), Int(EPERM)].contains(value.code) { return .access(target) }
+            if value.code == Int(ENOENT) { return .missing(target) }
+        }
+        if value.domain == NSCocoaErrorDomain {
+            if value.code == NSFileReadNoPermissionError { return .access(target) }
+            if [NSFileReadNoSuchFileError, NSFileNoSuchFileError].contains(value.code) { return .missing(target) }
+        }
+        if let underlying = value.userInfo[NSUnderlyingErrorKey] as? Error {
+            let issue = classify(underlying, at: file)
+            if case .invalid = issue {} else { return issue }
+        }
         return .invalid(target)
     }
 }
 
 enum SSHConfig {
+    static func realTarget(_ file: URL) -> URL {
+        var target = file.standardizedFileURL
+        for _ in 0..<32 {
+            guard let link = try? FileManager.default.destinationOfSymbolicLink(atPath: target.path) else {
+                return target.resolvingSymlinksInPath()
+            }
+            target = (link.hasPrefix("/") ? URL(fileURLWithPath: link) : target.deletingLastPathComponent().appendingPathComponent(link)).standardizedFileURL
+        }
+        return target
+    }
+
     static func isSafeAlias(_ name: String) -> Bool {
         !name.isEmpty && !name.hasPrefix("-") && !name.contains(where: { $0.isWhitespace || $0.isNewline || "/*?!%\\\"'".contains($0) })
     }
@@ -92,6 +116,10 @@ enum SSHConfig {
     }
 
     static func readHosts(at file: URL) throws -> [String] {
+        parseHosts(try readText(at: file))
+    }
+
+    static func readText(at file: URL) throws -> String {
         var visited: Set<String> = []
         var expandedLines: [String] = []
         func read(_ url: URL, depth: Int) throws {
@@ -126,7 +154,52 @@ enum SSHConfig {
             }
         }
         try read(file, depth: 0)
-        return parseHosts(expandedLines.joined(separator: "\n"))
+        return expandedLines.joined(separator: "\n")
+    }
+
+    /// Static inspection only: preflight must not execute untrusted Match exec.
+    static func knownHostsFiles(in text: String, hosts: [String], home: URL) -> [URL] {
+        var result: [URL] = []
+        for host in hosts.isEmpty ? [""] : hosts {
+            var applies = true
+            var configured: [String]?
+            var hostname = host
+            var port = "22"
+            var user = NSUserName()
+            var foundHostname = false, foundPort = false, foundUser = false
+            for line in text.components(separatedBy: .newlines) {
+                let parts = tokens(line)
+                guard let key = parts.first?.lowercased() else { continue }
+                if key == "host" {
+                    let patterns = parts.dropFirst().flatMap { $0.split(separator: ",").map(String.init) }
+                    func matches(_ value: String) -> Bool { fnmatch(value.lowercased(), host.lowercased(), 0) == 0 }
+                    applies = patterns.contains { !$0.hasPrefix("!") && matches($0) }
+                        && !patterns.contains { $0.hasPrefix("!") && matches(String($0.dropFirst())) }
+                } else if key == "match" { applies = false }
+                else if applies, parts.count > 1 {
+                    switch key {
+                    case "userknownhostsfile": if configured == nil { configured = Array(parts.dropFirst()) }
+                    case "hostname": if !foundHostname { hostname = parts[1]; foundHostname = true }
+                    case "port": if !foundPort { port = parts[1]; foundPort = true }
+                    case "user": if !foundUser { user = parts[1]; foundUser = true }
+                    default: break
+                    }
+                }
+            }
+            for raw in configured ?? [home.appendingPathComponent(".ssh/known_hosts").path] {
+                if raw.lowercased() == "none" { continue }
+                var value = raw
+                for (token, replacement) in [("%d", home.path), ("%h", hostname), ("%n", host), ("%p", port), ("%r", user), ("%u", NSUserName())] {
+                    value = value.replacingOccurrences(of: token, with: replacement)
+                }
+                if value.hasPrefix("~/") { value = home.path + value.dropFirst() }
+                // Unknown tokens/environment expansion are left to OpenSSH at connection time.
+                guard !value.contains("%"), !value.contains("${") else { continue }
+                let url = value.hasPrefix("/") ? URL(fileURLWithPath: value) : home.appendingPathComponent(value)
+                if !result.contains(url.standardizedFileURL) { result.append(url.standardizedFileURL) }
+            }
+        }
+        return result
     }
 
     static func listHosts() -> [String] {

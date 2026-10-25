@@ -44,7 +44,8 @@ struct ConfigurationFlowTests {
         config.sshConfigFile = file.path
         let state = directory.appendingPathComponent("state.json")
         try ConfigurationFile.save(config, to: state)
-        let store = Store(url: state)
+        let store = Store(url: state, sshRoot: directory)
+        #expect(store.selectSSHDirectory(directory))
         #expect(store.visibleHosts == ["first"])
         try "Host second\n".write(to: file, atomically: true, encoding: .utf8)
         store.refreshOnOpen()

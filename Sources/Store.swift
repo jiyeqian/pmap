@@ -15,6 +15,10 @@ final class Store: ObservableObject {
     @Published var storageIssue = false
     @Published var accessIssue = false
     @Published private(set) var configIssue: ConfigReadIssue?
+    @Published private(set) var knownHostsIssue: ConfigReadIssue?
+    @Published private(set) var folderAuthorized = false
+    private var checkedKnownHosts: [URL] = []
+    let sshRoot: URL
     @Published var quickInput = ""
     @Published var inputInvalid: InputIssue?
     @Published private(set) var lang = Lang.system
@@ -38,12 +42,13 @@ final class Store: ObservableObject {
     private let sendNotice: @MainActor (ConnectionNotice, Lang) -> Void
     private let requestNotifications: @MainActor () -> Void
 
-    init(url: URL = AppPaths.config, scanHosts: Bool = true, retryDelay: Duration = .seconds(3),
+    init(url: URL = AppPaths.config, scanHosts: Bool = true, sshRoot: URL = AppPaths.sshHome.appendingPathComponent(".ssh"), retryDelay: Duration = .seconds(3),
          heartbeatDelay: Duration = .seconds(30), portRetryDelay: Duration = .seconds(5),
          sendNotice: @escaping @MainActor (ConnectionNotice, Lang) -> Void = { Notifier.post($0, lang: $1) },
          requestNotifications: @escaping @MainActor () -> Void = { Notifier.requestAuthorization() },
          factory: @escaping @Sendable (String, String) -> any TunnelBackend = { SSHSession(host: $0, configPath: $1) }) {
         self.url = url
+        self.sshRoot = sshRoot.standardizedFileURL
         self.scansConfiguration = scanHosts
         self.factory = factory
         self.retryDelay = retryDelay
@@ -64,14 +69,61 @@ final class Store: ObservableObject {
     var visibleHosts: [String] { hostAliases.filter { !hiddenHosts.contains($0) } }
     var allRules: [Rule] { config.groups.flatMap(\.rules) + adhoc }
     var onCount: Int { active.count }
-    var sshDirectory: URL { URL(fileURLWithPath: config.sshDirectory ?? AppPaths.sshHome.appendingPathComponent(".ssh").path) }
+    var sshDirectory: URL { URL(fileURLWithPath: config.sshDirectory ?? sshRoot.path) }
     var configurationURL: URL {
         URL(fileURLWithPath: config.sshConfigFile ?? sshDirectory.appendingPathComponent("config").path).standardizedFileURL
     }
     var sshConfigPath: String { configurationURL.path }
-    var canConnect: Bool { config.trustedConfig && configIssue == nil && configReadable }
-    var hasErrors: Bool { storageIssue || configIssue != nil || hostError != nil || !errors.isEmpty }
+    var canConnect: Bool { config.trustedConfig && configIssue == nil && configReadable && (!scansConfiguration || folderAuthorized) }
+    var hasErrors: Bool { storageIssue || configIssue != nil || knownHostsIssue != nil || hostError != nil || !errors.isEmpty }
     func refreshOnOpen() { if scansConfiguration { refreshHosts() } }
+    var requiresSSHFolderAuthorization: Bool { scansConfiguration && !folderAuthorized }
+    private func updateFolderAuthorization() {
+        guard let saved = config.sshDirectory,
+              URL(fileURLWithPath: saved).resolvingSymlinksInPath() == sshRoot.resolvingSymlinksInPath(),
+              !AppPaths.isSandboxed || scopedURLs.contains(where: { $0.resolvingSymlinksInPath() == sshRoot.resolvingSymlinksInPath() }),
+              (try? FileManager.default.contentsOfDirectory(atPath: sshRoot.path)) != nil else {
+            folderAuthorized = false
+            return
+        }
+        folderAuthorized = true
+    }
+    @discardableResult
+    func selectSSHDirectory(_ directory: URL) -> Bool {
+        guard directory.resolvingSymlinksInPath() == sshRoot.resolvingSymlinksInPath() else { return false }
+        disconnect(clearDesired: activeHost != nil)
+        config.sshConfigFile = nil
+        config.trustedConfig = false
+        grantAccess([directory], sshFolder: true)
+        return folderAuthorized
+    }
+    var configMessage: String? {
+        guard let issue = configIssue else { return visibleHosts.isEmpty ? t(.noHostsFound) : nil }
+        if case .missing = issue, issue.target == SSHConfig.realTarget(configurationURL) { return t(.missingConfigHosts) }
+        return t(.unreadableConfig)
+    }
+    var knownHostsMessage: String? {
+        guard let issue = knownHostsIssue else { return nil }
+        if case .missing = issue { return t(.missingKnownHosts) }
+        return t(.unreadableKnownHosts)
+    }
+    var requiredFileAccess: (target: URL, message: L10n.Key)? {
+        if let issue = configIssue, issue.needsAccess { return (issue.target, .allowExternalConfig) }
+        if let issue = knownHostsIssue, issue.needsAccess { return (issue.target, .allowExternalKnownHosts) }
+        return nil
+    }
+    var supplementalAccess: (target: URL, message: L10n.Key)? {
+        if let issue = configIssue, issue.needsAccess, issue.target == SSHConfig.realTarget(configurationURL),
+           SSHConfig.realTarget(configurationURL) != configurationURL.standardizedFileURL {
+            return (issue.target, .allowExternalConfig)
+        }
+        if let issue = knownHostsIssue, issue.needsAccess,
+           checkedKnownHosts.contains(where: { SSHConfig.realTarget($0) == issue.target && $0.standardizedFileURL != issue.target }) {
+            return (issue.target, .allowExternalKnownHosts)
+        }
+        return nil
+    }
+
     func selectConfiguration(_ file: URL) {
         // An upgrade/import awaiting its first authorization must retain saved ports.
         disconnect(clearDesired: activeHost != nil)
@@ -132,20 +184,39 @@ final class Store: ObservableObject {
         catch { storageIssue = true }
     }
     func refreshHosts() {
-        if AppPaths.isSandboxed && scopedURLs.isEmpty {
-            configIssue = .access(configurationURL.resolvingSymlinksInPath())
-            accessIssue = true
+        updateFolderAuthorization()
+        if scansConfiguration && !folderAuthorized {
+            if activeHost != nil { disconnect(clearDesired: false) }
+            configIssue = nil
+            knownHostsIssue = nil
             hostAliases = []
             return
         }
         do {
-            hostAliases = try SSHConfig.readHosts(at: configurationURL)
+            let text = try SSHConfig.readText(at: configurationURL)
+            hostAliases = SSHConfig.parseHosts(text)
             configIssue = nil
             accessIssue = false
+            checkedKnownHosts = visibleHosts.isEmpty ? [] : SSHConfig.knownHostsFiles(in: text, hosts: visibleHosts, home: sshRoot.deletingLastPathComponent())
+            knownHostsIssue = nil
+            for file in checkedKnownHosts {
+                do {
+                    let handle = try FileHandle(forReadingFrom: file)
+                    defer { try? handle.close() }
+                    _ = try handle.read(upToCount: 1)
+                } catch {
+                    let issue = ConfigReadIssue.classify(error, at: file)
+                    // Permission errors get priority so a subsequent grant can reveal the next missing file.
+                    if knownHostsIssue == nil || issue.needsAccess { knownHostsIssue = issue }
+                    if issue.needsAccess { break }
+                }
+            }
+            accessIssue = knownHostsIssue?.needsAccess == true
             for host in hostAliases where hostState[host] == nil { hostState[host] = .off }
         } catch {
             configIssue = (error as? ConfigReadIssue) ?? .invalid(configurationURL)
-            accessIssue = true
+            accessIssue = configIssue?.needsAccess == true
+            knownHostsIssue = nil
             hostAliases = []
         }
     }
@@ -171,7 +242,7 @@ final class Store: ObservableObject {
         // Authorization changes are only applied after disconnecting the old session.
         guard activeHost == nil else { return }
         if !AppPaths.isSandboxed {
-            if sshFolder, let target = targets.first { config.sshDirectory = target.path }
+            if sshFolder, !targets.isEmpty { config.sshDirectory = sshRoot.path }
             accessIssue = false
             save()
             refreshHosts()
@@ -190,7 +261,7 @@ final class Store: ObservableObject {
                 bookmarks.append(data)
             }
             config.bookmarks = bookmarks
-            if sshFolder, let target = targets.first { config.sshDirectory = target.path }
+            if sshFolder, !targets.isEmpty { config.sshDirectory = sshRoot.path }
             accessIssue = false
             save()
             refreshHosts()
@@ -210,24 +281,21 @@ final class Store: ObservableObject {
             case .failed: "failed"
             }
         } else { "off" }
-        let configurationError: String = switch configIssue {
-        case .access: "access_denied"
-        case .missing: "file_missing"
-        case .invalid: "unreadable_or_invalid"
-        case nil: "none"
-        }
+        let configurationError = configIssue?.diagnosticCode ?? "none"
         let counts = Dictionary(grouping: errors.values, by: \.diagnosticCode)
             .map { "\($0.key)=\($0.value.count)" }.sorted().joined(separator: ", ")
         let status: String
-        if storageIssue || configIssue != nil || accessIssue || hostError != nil || !errors.isEmpty || state == "failed" { status = "attention_required" }
+        if storageIssue || configIssue != nil || knownHostsIssue != nil || accessIssue || hostError != nil || !errors.isEmpty || state == "failed" { status = "attention_required" }
         else if activeHost != nil && state == "connected" { status = "connected_service_unverified" }
         else if state == "connecting" || !pending.isEmpty { status = "working" }
+        else if requiresSSHFolderAuthorization { status = "ssh_folder_access_required" }
         else if !config.trustedConfig { status = "configuration_trust_required" }
         else { status = "idle" }
-        var lines = ["pmap \(version) (build \(build))", "Diagnostics format: 2",
+        var lines = ["pmap \(version) (build \(build))", "Diagnostics format: 3",
                      "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)", "Sandbox: \(AppPaths.isSandboxed)",
                      "Status: \(status)", "Host state: \(state)", "Host error: \(hostError?.diagnosticCode ?? "none")",
-                     "Configuration error: \(configurationError)", "Configuration trusted: \(config.trustedConfig)",
+                     "Configuration error: \(configurationError)", "SSH folder authorized: \(folderAuthorized)",
+                     "Known hosts error: \(knownHostsIssue?.diagnosticCode ?? "none")", "Configuration trusted: \(config.trustedConfig)",
                      "Hosts: \(hostAliases.count)", "Rules: \(allRules.count)", "Desired: \(desired.count)",
                      "Active: \(active.count)", "Pending: \(pending.count)", "Port errors: \(errors.count)",
                      "Port error categories: \(counts.isEmpty ? "none" : counts)",
@@ -242,10 +310,11 @@ final class Store: ObservableObject {
         if let issue = configIssue {
             actions.append(issue.needsAccess
                 ? text("SSH 配置需要授权：点击配置错误旁的授权入口，选择实际文件或链接目标。", "Authorize the actual SSH configuration file or symlink target using Allow Access beside the configuration error.")
-                : text("SSH 配置缺失或不可读：用选项菜单的选择配置…选择存在且可读的 SSH 文本配置。", "Use Options → Choose Configuration to select an existing, readable SSH text configuration."))
+                : text("SSH 配置缺失或不可读：检查 .ssh 文件夹中的 config 文件；配置读取正常后重新打开主面板。", "Check the config file in the .ssh folder, then reopen the panel after correcting it."))
         } else if accessIssue {
-            actions.append(text("存在文件授权问题：重新选择 SSH 配置并检查所引用资源的访问授权。", "Reauthorize the SSH configuration and check access to referenced resources."))
+            actions.append(text("存在文件授权问题：检查错误旁的补充授权入口。", "Use the supplemental access action beside the relevant error."))
         }
+        if let message = knownHostsMessage { actions.append(message) }
         if !config.trustedConfig {
             actions.append(text("仅在确认配置来源可信后，选择主机并确认信任；信任本身不授予文件权限。", "Only after checking the configuration is trustworthy, select a host and confirm trust. Trust does not grant file access."))
         }
@@ -273,6 +342,9 @@ final class Store: ObservableObject {
         let oldSessions = Array(sessions.values)
         let oldURLs = scopedURLs
         scopedURLs.removeAll()
+        folderAuthorized = false
+        knownHostsIssue = nil
+        checkedKnownHosts.removeAll()
         config.bookmarks.removeAll()
         config.sshDirectory = nil
         config.sshConfigFile = nil

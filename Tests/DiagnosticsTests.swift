@@ -68,7 +68,7 @@ struct DiagnosticsTests {
         #expect(report.contains("Configuration error: file_missing"))
         #expect(report.contains("Storage error: true"))
         #expect(report.contains("Back it up"))
-        #expect(report.contains("Choose Configuration"))
+        #expect(report.contains("Check the config file"))
         #expect(!report.contains("PRIVATE-MISSING"))
     }
 

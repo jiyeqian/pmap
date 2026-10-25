@@ -40,6 +40,16 @@ enum L10n {
         case importConfirm
         case importFailed
         case resumeSavedSession
+        case authorizeSSHDirectory
+        case allowAccess
+        case chooseSSHDirectoryOnly
+        case missingConfigHosts
+        case unreadableConfig
+        case missingKnownHosts
+        case unreadableKnownHosts
+        case allowExternalConfig
+        case allowExternalKnownHosts
+        case terminalCommandCopied
         case done
         case chooseConfig
         case options
@@ -151,6 +161,16 @@ enum L10n {
         .importConfirm: "导入",
         .importFailed: "无法导入配置，请检查文件与端口格式。",
         .resumeSavedSession: "恢复上次连接…",
+        .authorizeSSHDirectory: "授权 SSH 文件夹…",
+        .allowAccess: "允许",
+        .chooseSSHDirectoryOnly: "请选择 .ssh 文件夹。",
+        .missingConfigHosts: "未找到 config 文件，没有可用主机。",
+        .unreadableConfig: "无法读取 config 文件。",
+        .missingKnownHosts: "未找到 known_hosts 文件，请在终端验证主机。",
+        .unreadableKnownHosts: "无法读取 known_hosts 文件。",
+        .allowExternalConfig: "请允许读取 SSH 配置文件 config。",
+        .allowExternalKnownHosts: "请允许读取主机验证文件 known_hosts。",
+        .terminalCommandCopied: "命令已复制，请在终端粘贴并回车。",
         .done: "好",
         .chooseConfig: "选择配置…",
         .options: "选项",
@@ -160,13 +180,13 @@ enum L10n {
         .configNeedsAccess: "需要授权：{0}",
         .configMissing: "找不到配置：{0}",
         .configUnreadable: "无法读取：{0}",
-        .resetAccess: "重置授权…",
-        .resetTitle: "重置授权？",
+        .resetAccess: "撤销 SSH 访问…",
+        .resetTitle: "撤销 SSH 访问？",
         .resetBody: "将断开连接并清除授权记录，不删除任何文件。",
-        .resetConfirm: "重置",
+        .resetConfirm: "撤销",
         .connectConfirm: "信任并连接",
-        .helpBody: "选择主机，输入端口或端口:端口；可加 #备注。旧配置从选项菜单导入。首次主机验证和密钥解锁请在终端完成。",
-        .noHostsFound: "配置中没有具体主机",
+        .helpBody: "授权 .ssh 文件夹，选择主机，输入端口或端口:端口；可加 #备注。请在终端验证主机并解锁密钥。",
+        .noHostsFound: "config 文件中没有可用主机。",
         .copySSHCommand: "终端验证…",
 
         .connectionLost: "连接已断开；请查看主机状态。",
@@ -192,7 +212,7 @@ enum L10n {
         .behavior: "连接行为",
         .privacy: "隐私政策",
         .copyDiagnostics: "复制脱敏诊断",
-        .privacyText: "pmap 只连接你指定的 SSH 服务器，不向开发者发送数据。配置和授权记录保存在本机，不复制私钥。主机指纹由你核验。“重置授权”清除授权记录，不删除原文件。",
+        .privacyText: "pmap 只连接你指定的 SSH 服务器，不向开发者发送数据。配置和授权记录保存在本机，不复制私钥。主机指纹由你核验。“撤销 SSH 访问”清除授权记录，不删除原文件。",
         .revokeAccess: "撤销文件访问与配置信任",
         .forwardStatus: "转发已建立；未检测远端服务健康",
         .portStopped: "已停止",
@@ -243,7 +263,7 @@ enum L10n {
         .errConnRefused: "连接被拒绝",
         .errTimeout: "连接超时",
         .errHostNotFound: "找不到主机",
-        .errHostKeyRejected: "主机密钥校验失败",
+        .errHostKeyRejected: "主机密钥校验失败，请在终端验证主机。",
         .errHandshakeFailed: "SSH 握手失败",
         .errNoControlConnection: "SSH 连接不可用",
         .errRaw: "错误：{0}",
@@ -257,6 +277,16 @@ enum L10n {
         .importConfirm: "Import",
         .importFailed: "Cannot import configuration. Check the file and port format.",
         .resumeSavedSession: "Resume Saved Session…",
+        .authorizeSSHDirectory: "Allow SSH Folder Access…",
+        .allowAccess: "Allow",
+        .chooseSSHDirectoryOnly: "Choose the .ssh folder.",
+        .missingConfigHosts: "config file not found. No available hosts.",
+        .unreadableConfig: "Cannot read config file.",
+        .missingKnownHosts: "known_hosts file not found. Verify the host in Terminal.",
+        .unreadableKnownHosts: "Cannot read known_hosts file.",
+        .allowExternalConfig: "Allow reading the SSH configuration file config.",
+        .allowExternalKnownHosts: "Allow reading the host verification file known_hosts.",
+        .terminalCommandCopied: "Command copied. Paste it in Terminal and press Return.",
         .done: "OK",
         .chooseConfig: "Choose Configuration…",
         .options: "Options",
@@ -266,13 +296,13 @@ enum L10n {
         .configNeedsAccess: "Access needed: {0}",
         .configMissing: "Configuration missing: {0}",
         .configUnreadable: "Cannot read: {0}",
-        .resetAccess: "Reset Access…",
-        .resetTitle: "Reset access?",
+        .resetAccess: "Revoke SSH Access…",
+        .resetTitle: "Revoke SSH access?",
         .resetBody: "Disconnect and forget saved access. No files are deleted.",
-        .resetConfirm: "Reset",
+        .resetConfirm: "Revoke",
         .connectConfirm: "Trust & Connect",
-        .helpBody: "Select a host, then enter port or port:port; append #note for a label. Import previous configuration from Options. Verify new hosts and unlock keys in Terminal.",
-        .noHostsFound: "No explicit hosts in configuration",
+        .helpBody: "Allow access to .ssh, select a host, then enter port or port:port; append #note for a label. Verify the host and unlock keys in Terminal.",
+        .noHostsFound: "No available hosts in config file.",
         .copySSHCommand: "Verify in Terminal…",
 
         .connectionLost: "Connection lost. Check the host status.",
@@ -298,7 +328,7 @@ enum L10n {
         .behavior: "Connection Behavior",
         .privacy: "Privacy Policy",
         .copyDiagnostics: "Copy Redacted Diagnostics",
-        .privacyText: "pmap connects only to SSH servers you specify and sends no data to the developer. Configuration and access records stay on your Mac; private keys are not copied. You verify host fingerprints. Reset Access forgets saved permissions without deleting original files.",
+        .privacyText: "pmap connects only to SSH servers you specify and sends no data to the developer. Configuration and access records stay on your Mac; private keys are not copied. You verify host fingerprints. Revoke SSH Access forgets saved permissions without deleting original files.",
         .revokeAccess: "Revoke File Access and Configuration Trust",
         .forwardStatus: "Forward established; remote service health is not checked",
         .portStopped: "Stopped",
@@ -349,7 +379,7 @@ enum L10n {
         .errConnRefused: "Connection refused",
         .errTimeout: "Connection timed out",
         .errHostNotFound: "Host not found",
-        .errHostKeyRejected: "Host key verification failed",
+        .errHostKeyRejected: "Host key verification failed. Verify the host in Terminal.",
         .errHandshakeFailed: "SSH handshake failed",
         .errNoControlConnection: "SSH connection unavailable",
         .errRaw: "Error: {0}",

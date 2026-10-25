@@ -165,11 +165,11 @@ extension PortError {
         func text(_ zh: String, _ en: String) -> String { lang == .zh ? zh : en }
         switch self {
         case .hostKeyRejected:
-            return text("点击钥匙图标→终端验证…，粘贴已复制的命令执行。首次连接先通过可信渠道核对指纹；若提示指纹变化，先核实服务器身份再更新对应记录，不要删除整个 known_hosts 或关闭校验。若终端可登录，授权 SSH 配置实际使用的 known_hosts 文件（含外部链接目标），再重新选择原主机。", "Use the key menu → Verify in Terminal, paste and run the copied command. Verify new fingerprints through a trusted channel. If a key changed, verify the server before updating its entry; do not delete all known_hosts or disable checking. If Terminal connects, authorize the actual known_hosts file used by SSH (including external symlink targets), then reselect the host.")
+            return text("点击错误旁的终端验证…，粘贴已复制的命令执行。首次连接先通过可信渠道核对指纹；若提示指纹变化，先核实服务器身份再更新对应记录，不要删除整个 known_hosts 或关闭校验。若终端可登录，授权 SSH 配置实际使用的 known_hosts 文件（含外部链接目标），再重新选择原主机。", "Use Verify in Terminal beside the error, paste and run the copied command. Verify new fingerprints through a trusted channel. If a key changed, verify the server before updating its entry; do not delete all known_hosts or disable checking. If Terminal connects, authorize the actual known_hosts file used by SSH (including external symlink targets), then reselect the host.")
         case .fileAccess:
             return text("点击错误旁的授权入口，选择报错的实际文件或符号链接目标；授权后重新选择原主机。", "Use Allow Access beside the error to select the actual file or symlink target, then reselect the host.")
         case .authFailed, .tooManyAuthFailures:
-            return text("用钥匙菜单的终端验证确认登录和密钥解锁；核对 User、IdentityFile，密钥过多时配置 IdentitiesOnly yes。沙盒中授权实际密钥文件；Agent/钥匙串可能受限。处理后重新选择原主机。", "Verify login and unlock keys in Terminal. Check User and IdentityFile; use IdentitiesOnly yes when too many keys are offered. Authorize key files in the sandbox; Agent/Keychain access may be restricted. Then reselect the host.")
+            return text("在终端验证主机，确认登录和密钥解锁；核对 User、IdentityFile，密钥过多时配置 IdentitiesOnly yes。沙盒中授权实际密钥文件；Agent/钥匙串可能受限。处理后重新选择原主机。", "Verify login and unlock keys in Terminal. Check User and IdentityFile; use IdentitiesOnly yes when too many keys are offered. Authorize key files in the sandbox; Agent/Keychain access may be restricted. Then reselect the host.")
         case .localPortBusy:
             return text("在本机关闭占用该端口的程序，或删除失败规则并改用其他本地端口。自动重连开启时会重试；也可点击失败端口先停止、再开启。", "Stop the local program using the port, or replace the failed rule with a different local port. Auto Reconnect retries automatically; alternatively stop and restart the failed port.")
         case .forwardingNotAllowed:

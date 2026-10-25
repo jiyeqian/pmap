@@ -117,15 +117,32 @@ struct MenuPanel: View {
     @FocusState private var inputFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SwiftUI.Group {
-                if store.visibleHosts.isEmpty {
-                    Button(store.t(.chooseConfig)) { PanelActions.chooseConfiguration(store) }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .help(store.configIssue?.target.path ?? store.configurationURL.path)
-                } else { hostMenu }
+        SwiftUI.Group {
+            if store.requiresSSHFolderAuthorization { authorizationPanel }
+            else { workingPanel }
+        }
+        .frame(width: store.lang == .zh ? 220 : 240)
+        .onAppear { store.refreshOnOpen() }
+    }
+
+    private var authorizationPanel: some View {
+        VStack(spacing: 0) {
+            Button(store.t(.authorizeSSHDirectory)) { PanelActions.chooseSSHDirectory(store) }
+                .buttonStyle(.plain).font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+            Divider()
+            HStack {
+                Spacer()
+                Button { NSApp.terminate(nil) } label: { Image(systemName: "power").frame(width: 20, height: 20) }
+                    .buttonStyle(.plain).help(store.t(.quitHelp)).accessibilityLabel(store.t(.quit))
             }
+            .foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 8)
+        }
+    }
+
+    private var workingPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            hostMenu
             .font(.system(size: 12))
             .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 12)
 
@@ -187,38 +204,37 @@ struct MenuPanel: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12).padding(.top, 7).padding(.bottom, 10)
         }
-        .frame(width: store.lang == .zh ? 220 : 240)
-        .onAppear { inputFocused = true; store.refreshOnOpen() }
+        .onAppear { inputFocused = true }
     }
 
     @ViewBuilder private var issueRow: some View {
         if store.storageIssue {
             issueText(store.t(.storageIssue))
-        } else if let issue = store.configIssue,
-                  store.config.sshConfigFile != nil || !store.config.bookmarks.isEmpty || !AppPaths.isSandboxed {
+        } else if store.configIssue != nil {
             HStack(spacing: 6) {
-                Text(issue.description(store.lang)).lineLimit(1).help(issue.target.path)
-                Spacer(minLength: 0)
-                if issue.needsAccess {
-                    Button(store.t(.authorize)) { PanelActions.authorize(store, target: issue.target) }
-                        .buttonStyle(.plain)
+                Text(store.configMessage ?? store.t(.unreadableConfig)).fixedSize(horizontal: false, vertical: true)
+                if let request = store.requiredFileAccess {
+                    Button(store.t(.authorize)) { PanelActions.authorize(store, target: request.target) }.buttonStyle(.plain)
                 }
             }
-            .font(.system(size: 11)).foregroundStyle(.red)
-            .padding(.horizontal, 12).padding(.bottom, 8)
+            .font(.system(size: 11)).foregroundStyle(.red).padding(.horizontal, 12).padding(.bottom, 8)
+        } else if let message = store.knownHostsMessage {
+            HStack(spacing: 6) {
+                Text(message).fixedSize(horizontal: false, vertical: true)
+                if let request = store.requiredFileAccess {
+                    Button(store.t(.authorize)) { PanelActions.authorize(store, target: request.target) }.buttonStyle(.plain)
+                } else if !store.visibleHosts.isEmpty {
+                    Button { PanelActions.verifyInTerminal(store) } label: { Image(systemName: "terminal") }
+                        .help(store.t(.copySSHCommand)).accessibilityLabel(store.t(.copySSHCommand))
+                }
+            }
+            .font(.system(size: 11)).foregroundStyle(.red).padding(.horizontal, 12).padding(.bottom, 8)
         } else if let error = store.hostError {
             HStack(spacing: 6) {
                 Text(error.description(store.lang)).lineLimit(1).help(error.description(store.lang))
                 Spacer(minLength: 0)
                 if case .fileAccess(let path) = error {
                     Button(store.t(.authorize)) { PanelActions.authorize(store, target: URL(fileURLWithPath: path)) }
-                } else if error == .authFailed || error == .hostKeyRejected {
-                    Menu {
-                        Button(store.t(.copySSHCommand)) { PanelActions.verifyInTerminal(store) }
-                        Button(store.t(.grantResources)) { PanelActions.authorize(store) }
-                    } label: { Image(systemName: "key") }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .help(error.description(store.lang)).accessibilityLabel(error.description(store.lang))
                 } else {
                     Button { PanelActions.verifyInTerminal(store) } label: { Image(systemName: "terminal") }
                         .help(store.t(.copySSHCommand)).accessibilityLabel(store.t(.copySSHCommand))
@@ -372,10 +388,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hs = store.$hostState.map { _ in () }.eraseToAnyPublisher()
         let err = store.$errors.map { _ in () }.eraseToAnyPublisher()
         let ah = store.$activeHost.map { _ in () }.eraseToAnyPublisher()
-        countObserver = Publishers.MergeMany(any, cfg, adh, hs, err, ah)
+        let access = store.$folderAuthorized.map { _ in () }.eraseToAnyPublisher()
+        let configIssue = store.$configIssue.map { _ in () }.eraseToAnyPublisher()
+        let knownHosts = store.$knownHostsIssue.map { _ in () }.eraseToAnyPublisher()
+        countObserver = Publishers.MergeMany(any, cfg, adh, hs, err, ah, access, configIssue, knownHosts)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.refreshStatusIcon()
+                Task { @MainActor in self?.resizePanelToFit() }
             }
 
         // 语言切换：面板宽度按语言自适应（zh 180 / en 200），切换后即时调整
@@ -414,6 +434,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         p.contentView = content
         panel = p
+        if !CommandLine.arguments.contains("--panel") {
+            PanelActions.restoreMainPanel = { [weak self] in
+                DispatchQueue.main.async { self?.showPanel() }
+            }
+        }
+        #if PMAP_ACCESS_FIXTURE
+        if CommandLine.arguments.contains("--show-menu") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.showPanel() }
+        }
+        #endif
 
         // 点击面板外自动关闭（模拟菜单行为）
         let globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
@@ -493,11 +523,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func togglePanel(_ sender: Any?) {
-        guard let panel, let btn = statusItem?.button, let iconWin = btn.window else { return }
+        guard let panel else { return }
         if panel.isVisible {
             closePanel()
             return
         }
+        showPanel()
+    }
+
+    private func showPanel() {
+        guard let panel, let btn = statusItem?.button, let iconWin = btn.window else { return }
         Store.shared?.refreshOnOpen()
         // 尺寸随内容自适应（宽度由语言决定：zh 180 / en 200）
         let fit = panel.contentView?.fittingSize ?? NSSize(width: 180, height: 200)
@@ -566,7 +601,17 @@ struct PmapApp: App {
             return
         }
         #endif
-        if CommandLine.arguments.contains("--preview") {
+        let accessFixture: Store? = {
+            #if PMAP_ACCESS_FIXTURE
+            if let index = CommandLine.arguments.firstIndex(of: "--access-fixture"), index + 1 < CommandLine.arguments.count {
+                let root = URL(fileURLWithPath: CommandLine.arguments[index + 1]).appendingPathComponent(".ssh")
+                return Store(url: AppPaths.support.appendingPathComponent("folder-probe.json"), sshRoot: root)
+            }
+            #endif
+            return nil
+        }()
+        if let accessFixture { Store.shared = accessFixture }
+        else if CommandLine.arguments.contains("--preview") {
             let store = Store(url: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json"), scanHosts: false)
             store.config.trustedConfig = true
             store.hostAliases = ["demo"]
