@@ -62,6 +62,7 @@ struct Config: Codable {
     var autoReconnect = true
     var notifications = false
     var trustedConfig = false
+    var trustedConfigDigest: String? = nil
     var bookmarks: [Data] = []
     var sshDirectory: String? = nil
     var sshConfigFile: String? = nil
@@ -69,6 +70,7 @@ struct Config: Codable {
     init() {}
     enum CodingKeys: String, CodingKey {
         case schemaVersion, host, groups, adhoc, active, hiddenHosts, lang
+        case trustedConfigDigest
         case restoreOnLaunch, autoReconnect, notifications, trustedConfig, bookmarks, sshDirectory, sshConfigFile
     }
     init(from decoder: Decoder) throws {
@@ -84,6 +86,7 @@ struct Config: Codable {
         autoReconnect = try c.decodeIfPresent(Bool.self, forKey: .autoReconnect) ?? true
         notifications = try c.decodeIfPresent(Bool.self, forKey: .notifications) ?? false
         trustedConfig = try c.decodeIfPresent(Bool.self, forKey: .trustedConfig) ?? false
+        trustedConfigDigest = try c.decodeIfPresent(String.self, forKey: .trustedConfigDigest)
         bookmarks = try c.decodeIfPresent([Data].self, forKey: .bookmarks) ?? []
         sshDirectory = try c.decodeIfPresent(String.self, forKey: .sshDirectory)
         sshConfigFile = try c.decodeIfPresent(String.self, forKey: .sshConfigFile)

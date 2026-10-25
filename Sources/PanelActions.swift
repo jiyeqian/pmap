@@ -93,13 +93,11 @@ enum PanelActions {
     }
 
     private static func connectNow(_ host: String, store: Store) {
+        store.refreshOnOpen()
+        guard store.configIssue == nil else { return }
         if !store.config.trustedConfig {
-            let alert = NSAlert()
-            alert.messageText = store.t(.configTrust)
-            alert.informativeText = store.t(.configTrustBody)
-            alert.addButton(withTitle: store.t(.connectConfirm))
-            alert.addButton(withTitle: store.t(.cancelAction))
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard showDialog(title: store.t(.configTrust), text: store.t(.configTrustBody),
+                             close: store.t(.cancelAction), confirm: store.t(.connectConfirm)) else { return }
             store.confirmConfigurationTrust()
         }
         store.selectHost(host, restore: store.shouldRestoreSelection(host))

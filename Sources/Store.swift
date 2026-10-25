@@ -17,6 +17,7 @@ final class Store: ObservableObject {
     @Published private(set) var configIssue: ConfigReadIssue?
     @Published private(set) var knownHostsIssue: ConfigReadIssue?
     @Published private(set) var folderAuthorized = false
+    private var currentConfigDigest: String?
     private var checkedKnownHosts: [URL] = []
     let sshRoot: URL
     @Published var quickInput = ""
@@ -98,6 +99,7 @@ final class Store: ObservableObject {
         disconnect(clearDesired: activeHost != nil)
         config.sshConfigFile = nil
         config.trustedConfig = false
+        config.trustedConfigDigest = nil
         grantAccess([directory], sshFolder: true)
         return folderAuthorized
     }
@@ -134,9 +136,14 @@ final class Store: ObservableObject {
         config.sshConfigFile = file.standardizedFileURL.path
         config.sshDirectory = nil
         config.trustedConfig = false
+        config.trustedConfigDigest = nil
         grantAccess([file], sshFolder: false)
     }
-    func confirmConfigurationTrust() { config.trustedConfig = true; save() }
+    func confirmConfigurationTrust() {
+        config.trustedConfigDigest = currentConfigDigest
+        config.trustedConfig = true
+        save()
+    }
     var hasSavedSession: Bool {
         activeHost == nil && config.restoreOnLaunch && !config.host.isEmpty && visibleHosts.contains(config.host)
     }
@@ -200,6 +207,9 @@ final class Store: ObservableObject {
         }
         do {
             let text = try SSHConfig.readText(at: configurationURL)
+            currentConfigDigest = SSHConfig.trustDigest(text)
+            config.trustedConfig = !SSHConfig.requiresCommandTrust(text) || config.trustedConfigDigest == currentConfigDigest
+            if !config.trustedConfig, activeHost != nil { disconnect(clearDesired: false) }
             hostAliases = SSHConfig.parseHosts(text)
             configIssue = nil
             accessIssue = false
@@ -351,6 +361,7 @@ final class Store: ObservableObject {
         config.sshDirectory = nil
         config.sshConfigFile = nil
         config.trustedConfig = false
+        config.trustedConfigDigest = nil
         accessIssue = AppPaths.isSandboxed
         configIssue = AppPaths.isSandboxed ? .access(configurationURL) : nil
         hostAliases.removeAll()
@@ -383,6 +394,7 @@ final class Store: ObservableObject {
         !stopping && generation == id && activeHost == host && !Task.isCancelled
     }
     func selectHost(_ host: String, restore: Bool = false) {
+        if scansConfiguration { refreshHosts() }
         guard !stopping, canConnect, visibleHosts.contains(host), SSHConfig.isSafeAlias(host) else { return }
         if activeHost == host, hostState[host] == .on { return }
         disconnect(clearDesired: !restore)
@@ -400,6 +412,8 @@ final class Store: ObservableObject {
             while self.valid(id, host) {
                 guard firstAttempt || self.config.autoReconnect else { break }
                 firstAttempt = false
+                if self.scansConfiguration { self.refreshHosts() }
+                guard self.canConnect, self.valid(id, host) else { break }
                 let backend = self.factory(host, self.sshConfigPath)
                 self.session = backend
                 self.sessions[id] = backend
@@ -524,6 +538,8 @@ final class Store: ObservableObject {
             while self.valid(id, host), self.desired.contains(rule.local), self.allRules.contains(rule) {
                 guard firstAttempt || self.config.autoReconnect else { return }
                 firstAttempt = false
+                if self.scansConfiguration { self.refreshHosts() }
+                guard self.canConnect, self.valid(id, host) else { return }
                 let failure = await backend.forward(rule)
                 guard self.valid(id, host), self.portTokens[rule.local] == token,
                       self.desired.contains(rule.local), self.allRules.contains(rule) else {

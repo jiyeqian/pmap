@@ -38,7 +38,7 @@ open /Users/jiyeqian/Workspace/pmap/pmap-sandbox.app
 2. 点击“授权 SSH 文件夹…”，系统框默认定位 `~/.ssh`，点击“允许”。只接受这个默认目录；不再逐个选择 config 或 known_hosts。
 3. 授权后立即读取 `config`，检查实际使用的主机验证文件。仅在符号链接的真实目标因权限不足不可读时，接续弹出目标文件授权框。取消后不循环弹框，错误旁保留补充授权入口。
 4. 目录授权有效后进入工作菜单，即使 config 缺失、为空或不可读也不会退回首次授权界面。known_hosts 问题不隐藏主机列表。
-5. 配置首次使用时仍需确认可信；请在终端验证主机并解锁密钥。pmap 严格校验主机密钥，不自动接受新指纹或变更的指纹。
+5. 普通 SSH 配置直接连接；包含本机命令的配置首次连接时需确认。请在终端验证主机并解锁密钥。pmap 严格校验主机密钥，不自动接受新指纹或变更的指纹。
 
 目录及外部文件的访问书签会保存，重启后自动恢复；授权失效或执行 `…` → “撤销 SSH 访问…”后返回两栏菜单。撤销会断开受管主机和端口、取消重试与待开启状态，但保留端口列表、备注、语言和偏好，不修改原 SSH 文件。
 
@@ -108,7 +108,7 @@ open /Users/jiyeqian/Workspace/pmap/pmap-sandbox.app
 
 pmap 只读系统 SSH 配置和密钥。主机列表沿用 0.1.5 规则：排除含点、通配及否定模式，排除明确指向 `localhost`、`127.0.0.1`、`::1` 的别名；一行多个别名也会过滤。支持有界递归 Include。本机过滤只静态检查 Host/HostName，不执行 Match exec 或 DNS 查询；条件配置需由用户自行确认。含点主机需要使用无点别名。User、HostName、Port、IdentityFile 和 ProxyJump 交给系统 OpenSSH 解析。配置里的 LocalCommand、Agent/X11 转发和额外端口映射被禁用，仅管理面板声明的本地转发。
 
-ProxyCommand 和 Match exec 可能执行程序，因此仅在用户确认信任配置后运行，并仍受沙盒权限约束。完整边界见 [SSH 兼容契约](./docs/APP_STORE.md)。
+ProxyCommand、Match exec 和 KnownHostsCommand 可能执行程序，因此仅在用户确认后运行，并仍受沙盒权限约束。未使用这些指令的普通配置无需额外确认。静态检测覆盖展开的 Include，保守地检查全部主机段，不执行任何命令；已确认的内容保持不变时不重复提示，内容变化后重新确认。检测到未确认的命令配置时会停止当前受管连接并保留待恢复端口。完整边界见 [SSH 兼容契约](./docs/APP_STORE.md)。
 
 与 0.1.5 的逐项恢复及保留差异见 [版本差异](./docs/VERSION_COMPARISON.md)。
 

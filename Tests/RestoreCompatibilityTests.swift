@@ -91,7 +91,7 @@ struct RestoreCompatibilityTests {
         let backend = FakeTunnel()
         let store = Store(url: path.appendingPathComponent("new.json"), scanHosts: false, factory: { _, _ in backend })
         let ssh = path.appendingPathComponent("ssh.conf")
-        try "Host saved\n HostName remote.example\n".write(to: ssh, atomically: true, encoding: .utf8)
+        try "Host saved\n HostName remote.example\n ProxyCommand ssh jump -W %h:%p\n".write(to: ssh, atomically: true, encoding: .utf8)
         store.selectConfiguration(ssh)
         try store.importLegacyConfiguration(source)
         #expect(!store.config.trustedConfig)

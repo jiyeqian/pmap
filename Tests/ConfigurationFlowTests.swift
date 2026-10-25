@@ -11,12 +11,12 @@ struct ConfigurationFlowTests {
         return directory
     }
 
-    @Test("直接选择任意文件名，未信任也可列出主机")
+    @Test("包含命令的配置在确认前仅列出主机")
     func chooseFile() async throws {
         let directory = try directory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let file = directory.appendingPathComponent("SSH custom.conf")
-        try "Host demo\n HostName remote.example\n".write(to: file, atomically: true, encoding: .utf8)
+        try "Host demo\n HostName remote.example\n ProxyCommand ssh jump -W %h:%p\n".write(to: file, atomically: true, encoding: .utf8)
         let backend = FakeTunnel()
         let state = directory.appendingPathComponent("state.json")
         let store = Store(url: state, scanHosts: false, factory: { _, _ in backend })
@@ -32,6 +32,42 @@ struct ConfigurationFlowTests {
         #expect(restored.sshConfigPath == file.path)
         #expect(restored.config.trustedConfig)
         await store.shutdownAll()
+    }
+
+    @Test("普通配置免确认，命令与 Include 变化撤销既有信任")
+    func contentTrust() throws {
+        let directory = try directory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("config")
+        let included = directory.appendingPathComponent("extra")
+        let state = directory.appendingPathComponent("state.json")
+        try "Host demo\n HostName remote.example\n".write(to: file, atomically: true, encoding: .utf8)
+        let store = Store(url: state, scanHosts: false)
+        store.selectConfiguration(file)
+        #expect(store.canConnect)
+        try "Host demo\n ProxyCommand ssh jump -W %h:%p\n".write(to: included, atomically: true, encoding: .utf8)
+        try "Include \(included.path)\n".write(to: file, atomically: true, encoding: .utf8)
+        store.refreshHosts()
+        #expect(!store.canConnect)
+        store.confirmConfigurationTrust()
+        #expect(store.canConnect)
+        let restored = Store(url: state, scanHosts: false)
+        restored.refreshHosts()
+        #expect(restored.canConnect)
+        restored.adhoc = [Rule(local: 3080, remote: 80)]
+        restored.desired = [3080]
+        restored.activeHost = "demo"
+        try "Host demo\n ProxyCommand ssh different -W %h:%p\n".write(to: included, atomically: true, encoding: .utf8)
+        restored.refreshHosts()
+        #expect(!restored.canConnect)
+        #expect(restored.activeHost == nil)
+        #expect(restored.desired == [3080])
+        restored.revokeAccess()
+        #expect(restored.config.trustedConfigDigest == nil)
+        #expect(!SSHConfig.requiresCommandTrust("# ProxyCommand bad\nHost demo\n ProxyCommand none\n LocalCommand disabled"))
+        for text in ["ProxyCommand=ssh jump", "KnownHostsCommand /tmp/check", "Match exec \"test -f x\"", "Match !exec \"test -f x\""] {
+            #expect(SSHConfig.requiresCommandTrust(text))
+        }
     }
 
     @Test("打开面板时自动读取配置变化")

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Darwin
 
 enum ConfigReadIssue: Error, Equatable {
@@ -38,6 +39,21 @@ enum ConfigReadIssue: Error, Equatable {
 }
 
 enum SSHConfig {
+    static func requiresCommandTrust(_ text: String) -> Bool {
+        text.components(separatedBy: .newlines).contains { line in
+            let parts = tokens(line)
+            guard let key = parts.first?.lowercased() else { return false }
+            if ["proxycommand", "knownhostscommand"].contains(key) {
+                return parts.count > 1 && parts[1].lowercased() != "none"
+            }
+            return key == "match" && parts.dropFirst().contains { ["exec", "!exec"].contains($0.lowercased()) }
+        }
+    }
+
+    static func trustDigest(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
     static func realTarget(_ file: URL) -> URL {
         var target = file.standardizedFileURL
         for _ in 0..<32 {
