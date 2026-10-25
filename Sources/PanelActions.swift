@@ -21,6 +21,7 @@ enum PanelActions {
     static func authorize(_ store: Store, target: URL? = nil) { present { authorizeNow(store, target: target) } }
     static func connect(_ host: String, store: Store) { present { connectNow(host, store: store) } }
     static func importLegacy(_ store: Store) { present { importLegacyNow(store) } }
+    static func information(_ store: Store) { present { showTextNow(.runtimeInformation, text: store.redactedDiagnostics, store: store) } }
     static func reset(_ store: Store) { present { resetNow(store) } }
     static func show(_ key: L10n.Key, body: L10n.Key, store: Store) { present { showNow(key, body: body, store: store) } }
 
@@ -147,16 +148,37 @@ enum PanelActions {
         let alert = NSAlert()
         alert.messageText = store.t(.resetTitle)
         alert.informativeText = store.t(.resetBody)
-        alert.addButton(withTitle: store.t(.resetConfirm))
-        alert.addButton(withTitle: store.t(.cancelAction))
-        if alert.runModal() == .alertFirstButtonReturn { store.revokeAccess(); restoreMainPanel?() }
+        alert.addButton(withTitle: store.t(.cancelAction)).keyEquivalent = "\r"
+        alert.addButton(withTitle: store.t(.resetConfirm)).keyEquivalent = ""
+        if alert.runModal() == .alertSecondButtonReturn { store.revokeAccess(); restoreMainPanel?() }
     }
 
     private static func showNow(_ key: L10n.Key, body: L10n.Key, store: Store) {
+        showTextNow(key, text: store.t(body), store: store)
+    }
+
+    private static func showTextNow(_ key: L10n.Key, text: String, store: Store) {
         let alert = NSAlert()
         alert.messageText = store.t(key)
-        alert.informativeText = store.t(body)
-        alert.addButton(withTitle: store.t(.done))
+        alert.addButton(withTitle: store.t(.closeInformation))
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 380, height: key == .runtimeInformation ? 320 : 120))
+        scroll.hasVerticalScroller = true
+        let content = NSTextView(frame: scroll.bounds)
+        content.isEditable = false
+        content.isSelectable = true
+        content.drawsBackground = false
+        content.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        content.textColor = .labelColor
+        content.textContainerInset = NSSize(width: 0, height: 4)
+        content.isVerticallyResizable = true
+        content.isHorizontallyResizable = false
+        content.autoresizingMask = [.width]
+        content.textContainer?.widthTracksTextView = true
+        content.string = text
+        content.setSelectedRange(NSRange(location: 0, length: 0))
+        scroll.documentView = content
+        alert.accessoryView = scroll
+        alert.window.initialFirstResponder = content
         alert.runModal()
     }
 
@@ -169,35 +191,21 @@ enum PanelActions {
             NSWorkspace.shared.openApplication(at: url, configuration: .init())
         }
     }
-
-    static func copyDiagnostics(_ store: Store) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(store.redactedDiagnostics, forType: .string)
-    }
 }
 
 struct PanelOptions: View {
     @ObservedObject var store: Store
-    @State private var showingInformation = false
-    @State private var copied = false
 
     var body: some View {
         Menu {
             Button(store.lang == .zh ? "English" : "简体中文") { store.toggleLang() }
             Button(store.t(.resetAccess)) { PanelActions.reset(store) }
             Divider()
-            Button(store.t(.runtimeInformation)) {
-                copied = false
-                DispatchQueue.main.async { showingInformation = true }
-            }
+            Button(store.t(.runtimeInformation)) { PanelActions.information(store) }
             Button(store.t(.help)) {
                 NSWorkspace.shared.open(URL(string: "https://github.com/jiyeqian/pmap")!)
             }
-            Button(store.t(.privacy)) {
-                if let value = Bundle.main.object(forInfoDictionaryKey: "PmapPrivacyPolicyURL") as? String,
-                   let url = URL(string: value), url.scheme == "https" { NSWorkspace.shared.open(url) }
-                else { PanelActions.show(.privacy, body: .privacyText, store: store) }
-            }
+            Button(store.t(.privacy)) { PanelActions.show(.privacy, body: .privacyText, store: store) }
         } label: {
             Image(systemName: "ellipsis").frame(width: 20, height: 20)
         }
@@ -206,22 +214,5 @@ struct PanelOptions: View {
         .fixedSize()
         .help(store.t(.options))
         .accessibilityLabel(store.t(.options))
-        .popover(isPresented: $showingInformation) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(store.t(.runtimeInformation)).font(.headline)
-                ScrollView {
-                    Text(store.runtimeInformation)
-                        .font(.system(size: 12))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                Button(store.t(copied ? .informationCopied : .copyRuntimeInformation)) {
-                    PanelActions.copyDiagnostics(store)
-                    copied = true
-                }
-            }
-            .padding(16)
-            .frame(width: 340, height: 360)
-        }
     }
 }

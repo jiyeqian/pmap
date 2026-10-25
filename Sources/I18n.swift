@@ -91,8 +91,7 @@ enum L10n {
         case behavior
         case privacy
         case runtimeInformation
-        case copyRuntimeInformation
-        case informationCopied
+        case closeInformation
         case copyDiagnostics
         case privacyText
         case revokeAccess
@@ -185,8 +184,8 @@ enum L10n {
         .configUnreadable: "无法读取：{0}",
         .resetAccess: "撤销 SSH 文件夹授权",
         .resetTitle: "撤销 SSH 文件夹授权？",
-        .resetBody: "将断开当前主机及端口转发，清除 SSH 文件夹和关联文件的访问授权与配置信任，不删除任何文件。",
-        .resetConfirm: "撤销",
+        .resetBody: "将断开当前主机及端口转发，取消对 SSH 文件夹和关联文件的访问授权，并清除对 SSH 配置的信任。\n\n本操作不删除任何文件。",
+        .resetConfirm: "撤销授权",
         .connectConfirm: "信任并连接",
         .helpBody: "授权 .ssh 文件夹，选择主机，输入端口或端口:端口；可加 #备注。请在终端验证主机并解锁密钥。",
         .noHostsFound: "config 文件中没有可用主机。",
@@ -215,10 +214,9 @@ enum L10n {
         .behavior: "连接行为",
         .privacy: "隐私政策",
         .runtimeInformation: "运行信息",
-        .copyRuntimeInformation: "复制运行信息",
-        .informationCopied: "已复制",
+        .closeInformation: "关闭",
         .copyDiagnostics: "复制脱敏诊断",
-        .privacyText: "pmap 只连接你指定的 SSH 服务器，不向开发者发送数据。配置和授权记录保存在本机，不复制私钥。主机指纹由你核验。“撤销 SSH 文件夹授权”清除授权记录，不删除原文件。",
+        .privacyText: "pmap 仅连接你所选 SSH 配置中的服务器，不复制私钥，不向开发者发送数据。授权记录和配置仅保存在本机。\n\n你可通过“撤销 SSH 文件夹授权”取消文件访问授权。",
         .revokeAccess: "撤销文件访问与配置信任",
         .forwardStatus: "转发已建立；未检测远端服务健康",
         .portStopped: "已停止",
@@ -303,9 +301,9 @@ enum L10n {
         .configMissing: "Configuration missing: {0}",
         .configUnreadable: "Cannot read: {0}",
         .resetAccess: "Revoke SSH Folder Access",
-        .resetTitle: "Revoke SSH access?",
-        .resetBody: "Disconnect and forget saved access. No files are deleted.",
-        .resetConfirm: "Revoke",
+        .resetTitle: "Revoke SSH folder access?",
+        .resetBody: "Disconnect the current host and port forwards, revoke access to the SSH folder and associated files, and clear trust in the SSH configuration.\n\nNo files will be deleted.",
+        .resetConfirm: "Revoke Access",
         .connectConfirm: "Trust & Connect",
         .helpBody: "Allow access to .ssh, select a host, then enter port or port:port; append #note for a label. Verify the host and unlock keys in Terminal.",
         .noHostsFound: "No available hosts in config file.",
@@ -334,10 +332,9 @@ enum L10n {
         .behavior: "Connection Behavior",
         .privacy: "Privacy Policy",
         .runtimeInformation: "Runtime Information",
-        .copyRuntimeInformation: "Copy Runtime Information",
-        .informationCopied: "Copied",
+        .closeInformation: "Close",
         .copyDiagnostics: "Copy Redacted Diagnostics",
-        .privacyText: "pmap connects only to SSH servers you specify and sends no data to the developer. Configuration and access records stay on your Mac; private keys are not copied. You verify host fingerprints. Revoke SSH Access forgets saved permissions without deleting original files.",
+        .privacyText: "pmap connects only to servers in your selected SSH configuration, does not copy private keys, and sends no data to the developer. Access records and configuration stay on your Mac.\n\nUse “Revoke SSH Folder Access” to revoke file access.",
         .revokeAccess: "Revoke File Access and Configuration Trust",
         .forwardStatus: "Forward established; remote service health is not checked",
         .portStopped: "Stopped",
