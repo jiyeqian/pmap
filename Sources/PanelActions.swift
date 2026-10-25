@@ -161,24 +161,16 @@ enum PanelActions {
         let alert = NSAlert()
         alert.messageText = store.t(key)
         alert.addButton(withTitle: store.t(.closeInformation))
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 380, height: key == .runtimeInformation ? 320 : 120))
-        scroll.hasVerticalScroller = true
-        let content = NSTextView(frame: scroll.bounds)
-        content.isEditable = false
-        content.isSelectable = true
-        content.drawsBackground = false
-        content.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        content.textColor = .labelColor
-        content.textContainerInset = NSSize(width: 0, height: 4)
-        content.isVerticallyResizable = true
-        content.isHorizontallyResizable = false
-        content.autoresizingMask = [.width]
-        content.textContainer?.widthTracksTextView = true
-        content.string = text
-        content.setSelectedRange(NSRange(location: 0, length: 0))
-        scroll.documentView = content
-        alert.accessoryView = scroll
-        alert.window.initialFirstResponder = content
+        alert.informativeText = text
+        alert.layout()
+        // Native alert labels retain the standard appearance while allowing copy.
+        func makeSelectable(_ view: NSView) {
+            if let field = view as? NSTextField {
+                field.isSelectable = true
+            }
+            view.subviews.forEach(makeSelectable)
+        }
+        makeSelectable(alert.window.contentView!)
         alert.runModal()
     }
 

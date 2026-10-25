@@ -332,13 +332,10 @@ final class Store: ObservableObject {
         if state == "failed" && hostError == nil {
             actions.append(text("主机故障但缺少错误类别：重新选择主机重试，并检查界面或终端验证的具体错误。", "Host failed without an error category. Reselect it and inspect the UI or Terminal error."))
         }
-        if actions.isEmpty {
-            actions.append(text("当前未记录故障。若主机未连接，请选择主机；若转发已建立，请用浏览器或客户端确认远端服务。", "No fault is currently recorded. Select a host if disconnected; if forwarding is established, verify the remote service with a browser or client."))
+        if !actions.isEmpty {
+            lines += ["", text("恢复步骤：", "Recovery steps:")]
+            lines += actions.enumerated().map { "\($0.offset + 1). \($0.element)" }
         }
-        lines += ["", text("恢复步骤：", "Recovery steps:")]
-        lines += actions.enumerated().map { "\($0.offset + 1). \($0.element)" }
-        lines += ["", text("恢复验证：主机显示连通，所需端口为绿，最后用客户端确认服务响应；绿灯不保证远端服务健康。", "Verify recovery: host connected, desired ports green, then confirm service response with a client. Green does not guarantee remote service health."),
-                  text("说明：Access error 仅反映已记录的文件授权/配置读取问题；false 不保证 SSH 能读取全部资源。通知开关不等于系统已允许通知。本报告不执行任何修复。", "Access error reflects recorded file/configuration access issues; false does not guarantee SSH can read every resource. The notification preference does not confirm OS permission. This report performs no repairs.")]
         return lines.joined(separator: "\n") + "\n"
     }
     func revokeAccess() {

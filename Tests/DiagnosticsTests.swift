@@ -84,7 +84,10 @@ struct DiagnosticsTests {
         #expect(s.redactedDiagnostics.contains("Status: working"))
         s.hostState["private"] = .on
         #expect(s.redactedDiagnostics.contains("Status: connected_service_unverified"))
-        #expect(s.redactedDiagnostics.contains("Green does not guarantee"))
+        #expect(!s.redactedDiagnostics.contains("Green does not guarantee"))
+        #expect(!s.redactedDiagnostics.contains("Recovery steps:"))
+        #expect(!s.redactedDiagnostics.contains("No fault is currently recorded"))
+        #expect(!s.redactedDiagnostics.contains("This report performs no repairs"))
         s.hostState["private"] = .failed
         #expect(s.redactedDiagnostics.contains("Status: attention_required"))
         #expect(s.redactedDiagnostics.contains("Host failed without an error category"))
