@@ -145,12 +145,11 @@ enum PanelActions {
     }
 
     private static func resetNow(_ store: Store) {
-        let alert = NSAlert()
-        alert.messageText = store.t(.resetTitle)
-        alert.informativeText = store.t(.resetBody)
-        alert.addButton(withTitle: store.t(.cancelAction)).keyEquivalent = "\r"
-        alert.addButton(withTitle: store.t(.resetConfirm)).keyEquivalent = ""
-        if alert.runModal() == .alertSecondButtonReturn { store.revokeAccess(); restoreMainPanel?() }
+        if showDialog(title: store.t(.resetTitle), text: store.t(.resetBody),
+                      close: store.t(.cancelAction), confirm: store.t(.resetConfirm)) {
+            store.revokeAccess()
+            restoreMainPanel?()
+        }
     }
 
     private static func showNow(_ key: L10n.Key, body: L10n.Key, store: Store) {
@@ -158,20 +157,71 @@ enum PanelActions {
     }
 
     private static func showTextNow(_ key: L10n.Key, text: String, store: Store) {
-        let alert = NSAlert()
-        alert.messageText = store.t(key)
-        alert.addButton(withTitle: store.t(.closeInformation))
-        alert.informativeText = text
-        alert.layout()
-        // Native alert labels retain the standard appearance while allowing copy.
-        func makeSelectable(_ view: NSView) {
-            if let field = view as? NSTextField {
-                field.isSelectable = true
-            }
-            view.subviews.forEach(makeSelectable)
+        _ = showDialog(title: store.t(key), text: text, close: store.t(.closeInformation))
+    }
+
+    private static func showDialog(title: String, text: String, close: String, confirm: String? = nil) -> Bool {
+        let panel = InformationPanel(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isReleasedWhenClosed = false
+        let root = NSView()
+        panel.contentView = root
+
+        let icon = NSImageView()
+        icon.image = NSApp.applicationIconImage
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        let heading = NSTextField(wrappingLabelWithString: title)
+        heading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let body = NSTextField(wrappingLabelWithString: text)
+        body.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        body.isSelectable = true
+        heading.alignment = .left
+        body.alignment = .left
+        let words = NSStackView(views: [heading, body])
+        words.orientation = .vertical
+        words.alignment = .leading
+        words.spacing = 12
+        let row = NSStackView(views: [icon, words])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 20
+        let buttons = NSStackView()
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        let closeButton = NSButton(title: close, target: panel, action: #selector(InformationPanel.dismiss))
+        closeButton.bezelStyle = .rounded
+        closeButton.keyEquivalent = "\r"
+        buttons.addArrangedSubview(closeButton)
+        if let confirm {
+            let button = NSButton(title: confirm, target: panel, action: #selector(InformationPanel.accept))
+            button.bezelStyle = .rounded
+            buttons.addArrangedSubview(button)
         }
-        makeSelectable(alert.window.contentView!)
-        alert.runModal()
+        for view in [row, buttons] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 64),
+            icon.heightAnchor.constraint(equalToConstant: 64),
+            words.widthAnchor.constraint(equalToConstant: 380),
+            heading.widthAnchor.constraint(equalTo: words.widthAnchor),
+            body.widthAnchor.constraint(equalTo: words.widthAnchor),
+            row.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+            row.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
+            row.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
+            buttons.topAnchor.constraint(equalTo: row.bottomAnchor, constant: 24),
+            buttons.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            buttons.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
+        ])
+        root.layoutSubtreeIfNeeded()
+        panel.setContentSize(root.fittingSize)
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        let result = NSApp.runModal(for: panel)
+        panel.orderOut(nil)
+        return result == .OK
     }
 
     static func verifyInTerminal(_ store: Store) {
@@ -207,4 +257,12 @@ struct PanelOptions: View {
         .help(store.t(.options))
         .accessibilityLabel(store.t(.options))
     }
+}
+
+/// Explicit layout keeps short and long messages in the same two-column style.
+@MainActor
+private final class InformationPanel: NSPanel {
+    @objc func dismiss() { NSApp.stopModal(withCode: .cancel) }
+    @objc func accept() { NSApp.stopModal(withCode: .OK) }
+    override func cancelOperation(_ sender: Any?) { dismiss() }
 }
