@@ -4,13 +4,13 @@
 
 本分支采用方向二：系统 OpenSSH 的图形控制面板。保留用户的原配置和密钥，不导入复制私钥，不改写系统 SSH 配置。默认本地构建继续兼容现有使用方式；Xcode 工程和 `PMAP_SANDBOX=1` 构建启用 App Sandbox。两者共享连接与状态代码。
 
-下一版候选营销版本为 0.2.0，极简面板构建号为 2，后续独立递增；未创建下一版发布标签。v0.1.5 是改造前基线。基线双架构编译和 40 项测试通过，但旧构建中的图标打包在受限执行环境失败后被静默忽略，因此该标签不应被描述为已通过完整发布验收。
+下一版候选营销版本为 0.2.0，诊断完善构建号为 4，后续独立递增；未创建下一版发布标签。v0.1.5 是改造前基线。基线双架构编译和 40 项测试通过，但旧构建中的图标打包在受限执行环境失败后被静默忽略，因此该标签不应被描述为已通过完整发布验收。
 
 ## SSH 兼容契约
 
 | 能力 | 当前行为 |
 | --- | --- |
-| Host、含点别名、引号、注释 | 显示具体别名；拒绝通配、否定和可能成为命令选项的名字 |
+| Host、引号、注释 | 显示无点具体别名；排除通配、否定、明确指向本机及可能成为命令选项的名字；沿用 0.1.5 列表规则 |
 | Include | 有界递归、glob 展开与循环去重；权限不足明确报错；不执行 Match exec 来发现主机 |
 | User、HostName、Port、IdentityFile、ProxyJump | 交给系统 OpenSSH 处理；沙盒内相关文件需要授权 |
 | 私钥密码、主机首次信任 | 在终端完成；pmap 强制 BatchMode 和严格主机校验，不自动接受新密钥 |
@@ -19,7 +19,7 @@
 | 配置中的 LocalForward / RemoteForward / DynamicForward | 禁用；仅启用面板明确管理的本地转发 |
 | ProxyCommand、Match exec | 只在用户确认信任配置后交给 SSH；仍受沙盒限制，不保证任意外部程序可执行 |
 | SSH Agent、系统钥匙串、硬件密钥 | 普通构建沿用环境；沙盒访问和实际设备尚需逐项验收，不承诺完全等同终端 |
-| 外部 Include、私钥或脚本 | 通过设置分别授权，当前只请求只读文件权限；文件写入类命令不支持 |
+| 外部 Include、私钥或脚本 | 通过主面板错误旁的授权入口分别授权，当前只请求只读文件权限；文件写入类命令不支持 |
 | 转发绿灯 | 表示转发请求已建立，不代表远端应用服务健康 |
 
 终端确认必须核验可信渠道提供的主机指纹，不要为消除报错删除 known_hosts 条目或关闭主机密钥检查。
@@ -94,3 +94,5 @@ open /Users/jiyeqian/Workspace/pmap/.build-store/Build/Products/Debug/pmap.app
 - [Configuring the macOS App Sandbox](https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox)：网络与文件权限。
 - [Accessing files from App Sandbox](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox)：用户选择的目录与持久书签。
 - [Apple Developer Program](https://developer.apple.com/programs/)：正式分发所需会员。
+
+与 0.1.5 的恢复项目、保留差异和迁移步骤见 [版本差异](./VERSION_COMPARISON.md)。

@@ -3,8 +3,25 @@ import UserNotifications
 
 // MARK: - 系统通知
 
+enum ConnectionNotice: Equatable {
+    case disconnected
+    case reconnected(host: String, ports: Int)
+    case portsRestored(Int)
+}
+
 enum Notifier {
-    /// 申请通知授权（首次启动时调用）
+    static func post(_ notice: ConnectionNotice, lang: Lang) {
+        switch notice {
+        case .disconnected:
+            post(title: L10n.text(.notifyDisconnected, lang), body: L10n.text(.connectionLost, lang))
+        case .reconnected(_, let ports):
+            post(title: L10n.text(.notifyReconnected, lang), body: L10n.text(.notifyReconnectedSummary, lang, ports))
+        case .portsRestored(let count):
+            post(title: L10n.text(.notifyPortsRestored, lang), body: L10n.text(.notifyPortsRestoredBody, lang, count))
+        }
+    }
+
+    /// 申请通知授权（用户开启通知时调用）
     static func requestAuthorization() {
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { _, _ in }

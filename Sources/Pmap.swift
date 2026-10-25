@@ -67,26 +67,29 @@ struct Chip: View {
                 .frame(width: 10, height: 10)
                 .accessibilityHidden(true)
             Button(action: action) {
-                Text(rule.label)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 7) {
+                    Text(rule.label)
+                        .font(.system(size: 12, design: .monospaced))
+                        .fixedSize(horizontal: true, vertical: false)
+                    if let note = rule.displayNote {
+                        Text(note)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-                .buttonStyle(.plain)
-                .accessibilityLabel(rule.label)
-                .accessibilityValue(L10n.text(pending ? .portStarting : (light == .green ? .forwardStatus : (err != nil ? .portRetrying : .portStopped)), lang))
-                .accessibilityHint(hint)
-                .disabled(pending && !desired)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(1)   // 端口号优先完整显示，空间不足时截断备注
-            if let note = rule.note?.trimmingCharacters(in: .whitespaces), !note.isEmpty {
-                Text(note)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.primary)
+            .accessibilityLabel(rule.accessibleLabel)
+            .accessibilityValue(L10n.text(pending ? .portStarting : (light == .green ? .forwardStatus : (err != nil ? .portRetrying : .portStopped)), lang))
+            .accessibilityHint(hint)
+            .disabled(pending && !desired)
+            .help(rule.accessibleLabel + " · " + hint)
             Spacer(minLength: 0)
             // 删除图标（单击删除）
             Button(action: remove) {
@@ -148,12 +151,15 @@ struct MenuPanel: View {
             HStack(spacing: 6) {
                 Image(systemName: "plus").font(.system(size: 10)).foregroundStyle(.tertiary)
                 TextField("", text: $store.quickInput,
-                          prompt: Text(inputPrompt).font(.system(size: 11, design: .monospaced)))
+                          prompt: Text(inputPrompt)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(store.inputInvalid != nil ? .red : .secondary))
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(store.inputInvalid != nil ? Color.red : Color.primary)
                     .focused($inputFocused)
                     .accessibilityLabel(store.t(.portInput))
+                    .accessibilityValue(store.inputInvalid.map { $0.description(store.lang) } ?? store.quickInput)
                     .onSubmit { store.commitQuick() }
                     .onChange(of: store.quickInput) { _, value in if !value.isEmpty { store.inputInvalid = nil } }
             }
@@ -220,6 +226,10 @@ struct MenuPanel: View {
             }
             .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.red)
             .padding(.horizontal, 12).padding(.bottom, 8)
+        } else if store.hasSavedSession {
+            Button(store.t(.resumeSavedSession)) { PanelActions.connect(store.config.host, store: store) }
+                .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).padding(.bottom, 8)
         } else if store.visibleHosts.isEmpty, store.configIssue == nil {
             issueText(store.t(.noHostsFound))
         }
@@ -229,7 +239,7 @@ struct MenuPanel: View {
             .lineLimit(1).help(text).padding(.horizontal, 12).padding(.bottom, 8)
     }
     private var inputPrompt: String {
-        store.inputInvalid == .duplicatedPort ? store.t(.inputDuplicated) : usageHint
+        store.inputInvalid?.description(store.lang) ?? usageHint
     }
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "__PMAP_VERSION__"

@@ -70,7 +70,17 @@ actor SSHSession: TunnelBackend {
     func forward(_ rule: Rule) async -> PortError? {
         guard !closed else { return .noControlConnection }
         let result = await Shell.execute("/usr/bin/ssh", controlOptions + ["-O", "forward", "-L", "127.0.0.1:\(rule.local):127.0.0.1:\(rule.remote)", "--", host], directory: directory)
-        return result.code == 0 ? nil : PortError.classify(result.error, localPort: rule.local)
+        guard result.code != 0 else { return nil }
+        let failure = PortError.classify(result.error, localPort: rule.local)
+        // ControlMaster may return only a generic mux failure, without its bind error.
+        // Probe loopback binding as a fallback; lsof is optional inside the sandbox.
+        if Shell.localPortInUse(rule.local) {
+            return .localPortBusy(port: rule.local, by: await Shell.portBusy(rule.local))
+        }
+        if case .localPortBusy = failure {
+            return .localPortBusy(port: rule.local, by: await Shell.portBusy(rule.local))
+        }
+        return failure
     }
 
     func cancel(_ rule: Rule) async -> PortError? {

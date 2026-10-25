@@ -19,6 +19,7 @@ enum PanelActions {
     static func chooseConfiguration(_ store: Store) { present { chooseConfigurationNow(store) } }
     static func authorize(_ store: Store, target: URL? = nil) { present { authorizeNow(store, target: target) } }
     static func connect(_ host: String, store: Store) { present { connectNow(host, store: store) } }
+    static func importLegacy(_ store: Store) { present { importLegacyNow(store) } }
     static func reset(_ store: Store) { present { resetNow(store) } }
     static func show(_ key: L10n.Key, body: L10n.Key, store: Store) { present { showNow(key, body: body, store: store) } }
 
@@ -58,7 +59,46 @@ enum PanelActions {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             store.confirmConfigurationTrust()
         }
-        store.selectHost(host, restore: store.activeHost == host)
+        store.selectHost(host, restore: store.shouldRestoreSelection(host))
+    }
+
+    private static func importLegacyNow(_ store: Store) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.showsHiddenFiles = true
+        panel.directoryURL = AppPaths.sshHome.appendingPathComponent("Library/Application Support/Pmap")
+        panel.message = store.t(.importLegacy)
+        let parent = NSApp.keyWindow ?? NSApp.mainWindow
+        let completion: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let file = panel.url else { return }
+            confirmImport(file, store: store, parent: parent)
+        }
+        if let parent { panel.beginSheetModal(for: parent, completionHandler: completion) }
+        else { panel.begin(completionHandler: completion) }
+    }
+
+    private static func confirmImport(_ file: URL, store: Store, parent: NSWindow?) {
+        let accessing = file.startAccessingSecurityScopedResource()
+        let alert = NSAlert()
+        alert.messageText = store.t(.importTitle)
+        alert.informativeText = store.t(.importBody)
+        alert.addButton(withTitle: store.t(.importConfirm))
+        alert.addButton(withTitle: store.t(.cancelAction))
+        let completion: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+            defer { if accessing { file.stopAccessingSecurityScopedResource() } }
+            guard response == .alertFirstButtonReturn else { return }
+            do { try store.importLegacyConfiguration(file) }
+            catch {
+                let failure = NSAlert()
+                failure.messageText = store.t(.importFailed)
+                failure.addButton(withTitle: store.t(.done))
+                if let parent { failure.beginSheetModal(for: parent) }
+                else { failure.runModal() }
+            }
+        }
+        if let parent { alert.beginSheetModal(for: parent, completionHandler: completion) }
+        else { completion(alert.runModal()) }
     }
 
     private static func resetNow(_ store: Store) {
@@ -105,9 +145,11 @@ struct PanelOptions: View {
     var body: some View {
         Menu {
             Button(store.t(.chooseConfig)) { PanelActions.chooseConfiguration(store) }
+            Button(store.t(.importLegacy)) { PanelActions.importLegacy(store) }
             Divider()
             Toggle(store.t(.restoreOnLaunch), isOn: preference(\Config.restoreOnLaunch))
             Toggle(store.t(.autoReconnect), isOn: preference(\Config.autoReconnect))
+            Toggle(store.t(.notificationsSetting), isOn: Binding(get: { store.config.notifications }, set: { store.setNotifications($0) }))
             Divider()
             Button(store.t(.resetAccess)) { PanelActions.reset(store) }
             if store.hasErrors {

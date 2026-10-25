@@ -52,20 +52,48 @@ enum SSHConfig {
 
     static func parseHosts(_ text: String, selfAliases: Set<String> = []) -> [String] {
         var result: [String] = []
+        let excluded = selfAliases.union(localAliases(in: text))
         for line in text.components(separatedBy: .newlines) {
             let parts = tokens(line)
             guard parts.first?.lowercased() == "host" else { continue }
             // Keep comma-separated aliases accepted by older pmap versions.
             for name in parts.dropFirst().flatMap({ $0.split(separator: ",").map(String.init) }) {
-                if isSafeAlias(name), !selfAliases.contains(name), !result.contains(name) { result.append(name) }
+                if isSafeAlias(name), !name.contains("."), !excluded.contains(name), !result.contains(name) { result.append(name) }
             }
         }
         return result
     }
 
+    // Inspect only Host/HostName text; never execute Match exec or ssh -G to build the list.
+    private static func localAliases(in text: String) -> Set<String> {
+        let lines = text.components(separatedBy: .newlines).map(tokens)
+        let aliases = lines.filter { $0.first?.lowercased() == "host" }
+            .flatMap { $0.dropFirst().flatMap { $0.split(separator: ",").map(String.init) } }
+            .filter { isSafeAlias($0) && !$0.contains(".") }
+        var local: Set<String> = []
+        for alias in Set(aliases) {
+            var matches = true
+            for parts in lines {
+                guard let key = parts.first?.lowercased() else { continue }
+                if key == "host" {
+                    let patterns = parts.dropFirst().flatMap { $0.split(separator: ",").map(String.init) }
+                    func match(_ pattern: String) -> Bool { fnmatch(pattern.lowercased(), alias.lowercased(), 0) == 0 }
+                    matches = patterns.contains { !$0.hasPrefix("!") && match($0) }
+                        && !patterns.contains { $0.hasPrefix("!") && match(String($0.dropFirst())) }
+                } else if key == "match" {
+                    matches = false
+                } else if key == "hostname", matches, parts.count > 1 {
+                    if ["localhost", "127.0.0.1", "::1"].contains(parts[1].lowercased()) { local.insert(alias) }
+                    break // OpenSSH uses the first applicable value.
+                }
+            }
+        }
+        return local
+    }
+
     static func readHosts(at file: URL) throws -> [String] {
         var visited: Set<String> = []
-        var result: [String] = []
+        var expandedLines: [String] = []
         func read(_ url: URL, depth: Int) throws {
             guard depth < 16, visited.count < 256 else { throw CocoaError(.fileReadTooLarge) }
             let path = url.standardizedFileURL.path
@@ -79,9 +107,7 @@ enum SSHConfig {
             for line in text.components(separatedBy: .newlines) {
                 let parts = tokens(line)
                 guard let key = parts.first?.lowercased() else { continue }
-                if key == "host" {
-                    for name in parseHosts(line) where !result.contains(name) { result.append(name) }
-                } else if key == "include" {
+                if key == "include" {
                     for pattern in parts.dropFirst() {
                         let expanded = pattern.hasPrefix("~/") ? AppPaths.sshHome.path + String(pattern.dropFirst()) : pattern
                         let absolute = expanded.hasPrefix("/") ? expanded : AppPaths.sshHome.appendingPathComponent(".ssh/" + expanded).path
@@ -96,11 +122,11 @@ enum SSHConfig {
                             }
                         }
                     }
-                }
+                } else { expandedLines.append(line) }
             }
         }
         try read(file, depth: 0)
-        return result
+        return parseHosts(expandedLines.joined(separator: "\n"))
     }
 
     static func listHosts() -> [String] {

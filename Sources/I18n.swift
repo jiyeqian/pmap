@@ -33,6 +33,13 @@ enum L10n {
     /// 全部文案键。`CaseIterable` 用于单测校验「每个键都翻译齐了」。
     enum Key: String, CaseIterable {
 
+        case inputBadFormat
+        case importLegacy
+        case importTitle
+        case importBody
+        case importConfirm
+        case importFailed
+        case resumeSavedSession
         case done
         case chooseConfig
         case options
@@ -114,6 +121,7 @@ enum L10n {
         case notifyDisconnected
         case notifyReconnectBody
         case notifyReconnected
+        case notifyReconnectedSummary
         case notifyReconnectedBody
         case notifyPortsRestored
         case notifyPortsRestoredBody
@@ -136,6 +144,13 @@ enum L10n {
     }
 
     private static let zh: [Key: String] = [
+        .inputBadFormat: "格式：端口或端口:端口",
+        .importLegacy: "导入旧版配置…",
+        .importTitle: "导入旧版配置？",
+        .importBody: "替换当前端口、语言和上次连接记录；保留当前文件授权，不删除原文件。",
+        .importConfirm: "导入",
+        .importFailed: "无法导入配置，请检查文件与端口格式。",
+        .resumeSavedSession: "恢复上次连接…",
         .done: "好",
         .chooseConfig: "选择配置…",
         .options: "选项",
@@ -150,7 +165,7 @@ enum L10n {
         .resetBody: "将断开连接并清除授权记录，不删除任何文件。",
         .resetConfirm: "重置",
         .connectConfirm: "信任并连接",
-        .helpBody: "选择配置，选择主机，再输入端口。首次主机验证和密钥解锁请在终端完成。",
+        .helpBody: "选择主机，输入端口或端口:端口；可加 #备注。旧配置从选项菜单导入。首次主机验证和密钥解锁请在终端完成。",
         .noHostsFound: "配置中没有具体主机",
         .copySSHCommand: "终端验证…",
 
@@ -173,7 +188,7 @@ enum L10n {
         .storageIssue: "配置读写失败",
         .restoreOnLaunch: "启动时恢复",
         .autoReconnect: "自动重连",
-        .notificationsSetting: "连接中断时通知我",
+        .notificationsSetting: "连接状态通知",
         .behavior: "连接行为",
         .privacy: "隐私政策",
         .copyDiagnostics: "复制脱敏诊断",
@@ -213,6 +228,7 @@ enum L10n {
         .notifyDisconnected: "pmap 连接断开",
         .notifyReconnectBody: "主机 {0} 已断开，正在自动重连…",
         .notifyReconnected: "pmap 已重连",
+        .notifyReconnectedSummary: "连接已恢复，{0} 个端口待恢复",
         .notifyReconnectedBody: "主机 {0} 连接已恢复，{1} 个端口待恢复",
         .notifyPortsRestored: "pmap 端口已恢复",
         .notifyPortsRestoredBody: "{0} 个端口转发已自动恢复",
@@ -234,6 +250,13 @@ enum L10n {
     ]
 
     private static let en: [Key: String] = [
+        .inputBadFormat: "Use port or port:port",
+        .importLegacy: "Import Previous Configuration…",
+        .importTitle: "Import previous configuration?",
+        .importBody: "Replace current ports, language, and saved session. Keep current file access. Original files are not deleted.",
+        .importConfirm: "Import",
+        .importFailed: "Cannot import configuration. Check the file and port format.",
+        .resumeSavedSession: "Resume Saved Session…",
         .done: "OK",
         .chooseConfig: "Choose Configuration…",
         .options: "Options",
@@ -248,7 +271,7 @@ enum L10n {
         .resetBody: "Disconnect and forget saved access. No files are deleted.",
         .resetConfirm: "Reset",
         .connectConfirm: "Trust & Connect",
-        .helpBody: "Choose a configuration, select a host, then enter a port. Verify new hosts and unlock keys in Terminal.",
+        .helpBody: "Select a host, then enter port or port:port; append #note for a label. Import previous configuration from Options. Verify new hosts and unlock keys in Terminal.",
         .noHostsFound: "No explicit hosts in configuration",
         .copySSHCommand: "Verify in Terminal…",
 
@@ -271,7 +294,7 @@ enum L10n {
         .storageIssue: "Configuration error",
         .restoreOnLaunch: "Restore on Launch",
         .autoReconnect: "Auto Reconnect",
-        .notificationsSetting: "Notify Me When a Connection Drops",
+        .notificationsSetting: "Connection Notifications",
         .behavior: "Connection Behavior",
         .privacy: "Privacy Policy",
         .copyDiagnostics: "Copy Redacted Diagnostics",
@@ -311,6 +334,7 @@ enum L10n {
         .notifyDisconnected: "pmap disconnected",
         .notifyReconnectBody: "Host {0} dropped; reconnecting…",
         .notifyReconnected: "pmap reconnected",
+        .notifyReconnectedSummary: "Connection restored; {0} port forward(s) pending",
         .notifyReconnectedBody: "Host {0} restored; {1} port forward(s) pending",
         .notifyPortsRestored: "pmap ports restored",
         .notifyPortsRestoredBody: "{0} port forward(s) recovered automatically",

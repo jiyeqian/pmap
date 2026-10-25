@@ -16,6 +16,10 @@ actor FakeTunnel: TunnelBackend {
     var forwards = 0
     var cancellations = 0
     var shutdowns = 0
+    var healthy = true
+    func setHealthy(_ value: Bool) { healthy = value }
+    func setConnectFailure(_ value: PortError?) { connectFailure = value }
+    func setForwardFailure(_ value: PortError?) { forwardFailure = value }
     init(waitConnect: Bool = false, waitForward: Bool = false, connectFailure: PortError? = nil, forwardFailure: PortError? = nil, cancelFailure: PortError? = nil) {
         self.waitConnect = waitConnect; self.waitForward = waitForward
         self.connectFailure = connectFailure
@@ -34,7 +38,7 @@ actor FakeTunnel: TunnelBackend {
         return forwardFailure
     }
     func releaseForward() { forwardGate?.resume(returning: nil); forwardGate = nil }
-    func check() async -> Bool { true }
+    func check() async -> Bool { healthy }
     func cancel(_ rule: Rule) async -> PortError? { cancellations += 1; return cancelFailure }
     func shutdown() async { shutdowns += 1 }
 }
@@ -248,7 +252,7 @@ struct ConfigurationTests {
         let child = dir.appendingPathComponent("extra config")
         try "Host=\"a.example\" # ignored\nInclude \"\(child.path)\"\n".write(to: file, atomically: true, encoding: .utf8)
         try "Host b\nInclude \(file.path)\n".write(to: child, atomically: true, encoding: .utf8)
-        #expect(try SSHConfig.readHosts(at: file) == ["a.example", "b"])
+        #expect(try SSHConfig.readHosts(at: file) == ["b"])
         #expect(!SSHConfig.isSafeAlias("-oProxyCommand=bad"))
         #expect(!SSHConfig.isSafeAlias("../../socket"))
     }

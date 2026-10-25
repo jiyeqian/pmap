@@ -23,6 +23,11 @@ enum IntegrationProbe {
             let session = SSHSession(host: "fixture", configPath: configURL.path, directory: longDirectory)
             if let error = await session.connect() { print("FAIL connect: \(error)"); await session.shutdown(); return 1 }
             print("PASS system SSH connected (sandbox=\(AppPaths.isSandboxed))")
+            let occupied = await session.forward(Rule(local: 39228, remote: 39228))
+            guard case .localPortBusy(port: 39228, by: _) = occupied else {
+                print("FAIL occupied port: \(String(describing: occupied))"); await session.shutdown(); return 1
+            }
+            print("PASS occupied port classified with optional process detail")
             let rule = Rule(local: 39229, remote: 39228)
             if let error = await session.forward(rule) { print("FAIL forward: \(error)"); await session.shutdown(); return 1 }
             let response = await Shell.execute("/usr/bin/curl", ["--silent", "--show-error", "--max-time", "3", "http://127.0.0.1:39229/"])

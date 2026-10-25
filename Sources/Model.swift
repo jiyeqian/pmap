@@ -36,6 +36,11 @@ struct Rule: Codable, Hashable, Identifiable, Sendable {
 
     /// 统一按 port:port 显示（即使 local==remote）
     var label: String { "\(local):\(remote)" }
+    var displayNote: String? {
+        guard let value = note?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return value
+    }
+    var accessibleLabel: String { displayNote.map { label + " · " + $0 } ?? label }
 }
 
 struct Group: Codable, Identifiable {
@@ -87,6 +92,10 @@ struct Config: Codable {
 
 /// 输入框错误类型（结构化存储，渲染时按语言翻译）
 enum InputIssue: Equatable {
+    func description(_ lang: Lang) -> String {
+        L10n.text(self == .badFormat ? .inputBadFormat : .inputDuplicated, lang)
+    }
+
     /// 格式不对（提示仍显示 port/port:port 格式说明）
     case badFormat
     /// 本地端口已被映射

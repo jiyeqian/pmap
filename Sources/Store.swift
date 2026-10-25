@@ -33,13 +33,24 @@ final class Store: ObservableObject {
     private let factory: @Sendable (String, String) -> any TunnelBackend
     private let retryDelay: Duration
     private let scansConfiguration: Bool
+    private let heartbeatDelay: Duration
+    private let portRetryDelay: Duration
+    private let sendNotice: @MainActor (ConnectionNotice, Lang) -> Void
+    private let requestNotifications: @MainActor () -> Void
 
     init(url: URL = AppPaths.config, scanHosts: Bool = true, retryDelay: Duration = .seconds(3),
+         heartbeatDelay: Duration = .seconds(30), portRetryDelay: Duration = .seconds(5),
+         sendNotice: @escaping @MainActor (ConnectionNotice, Lang) -> Void = { Notifier.post($0, lang: $1) },
+         requestNotifications: @escaping @MainActor () -> Void = { Notifier.requestAuthorization() },
          factory: @escaping @Sendable (String, String) -> any TunnelBackend = { SSHSession(host: $0, configPath: $1) }) {
         self.url = url
         self.scansConfiguration = scanHosts
         self.factory = factory
         self.retryDelay = retryDelay
+        self.heartbeatDelay = heartbeatDelay
+        self.portRetryDelay = portRetryDelay
+        self.sendNotice = sendNotice
+        self.requestNotifications = requestNotifications
         do { config = try ConfigurationFile.load(url) }
         catch { storageIssue = true; configReadable = false }
         lang = config.lang.flatMap(Lang.init(rawValue:)) ?? .system
@@ -62,13 +73,49 @@ final class Store: ObservableObject {
     var hasErrors: Bool { storageIssue || configIssue != nil || hostError != nil || !errors.isEmpty }
     func refreshOnOpen() { if scansConfiguration { refreshHosts() } }
     func selectConfiguration(_ file: URL) {
-        disconnect()
+        // An upgrade/import awaiting its first authorization must retain saved ports.
+        disconnect(clearDesired: activeHost != nil)
         config.sshConfigFile = file.standardizedFileURL.path
         config.sshDirectory = nil
         config.trustedConfig = false
         grantAccess([file], sshFolder: false)
     }
     func confirmConfigurationTrust() { config.trustedConfig = true; save() }
+    var hasSavedSession: Bool {
+        activeHost == nil && config.restoreOnLaunch && !config.host.isEmpty && visibleHosts.contains(config.host)
+    }
+    func shouldRestoreSelection(_ host: String) -> Bool {
+        activeHost == host || (hasSavedSession && config.host == host)
+    }
+    func importLegacyConfiguration(_ file: URL) throws {
+        guard configReadable else { throw CocoaError(.coderReadCorrupt) }
+        // A missing import must fail, rather than being interpreted as an empty new configuration.
+        _ = try Data(contentsOf: file)
+        let previous = try ConfigurationFile.load(file)
+        var imported = config
+        imported.host = previous.host
+        imported.groups = previous.groups
+        imported.adhoc = previous.adhoc
+        imported.active = previous.active
+        imported.hiddenHosts = previous.hiddenHosts
+        imported.lang = previous.lang
+        // Validate and persist before disconnecting/replacing current in-memory state.
+        try ConfigurationFile.save(imported, to: url)
+        disconnect(clearDesired: false)
+        config = imported
+        adhoc = imported.adhoc ?? []
+        desired = Set(imported.active ?? []).intersection(Set(allRules.map(\.local)))
+        lang = imported.lang.flatMap(Lang.init(rawValue:)) ?? .system
+        save()
+    }
+    func setNotifications(_ enabled: Bool) {
+        config.notifications = enabled
+        if enabled { requestNotifications() }
+        save()
+    }
+    private func notify(_ notice: ConnectionNotice) {
+        if config.notifications { sendNotice(notice, lang) }
+    }
 
 
     func t(_ key: L10n.Key) -> String { L10n.text(key, lang) }
@@ -154,7 +201,71 @@ final class Store: ObservableObject {
     }
     var redactedDiagnostics: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
-        return "pmap \(version)\nmacOS \(ProcessInfo.processInfo.operatingSystemVersionString)\nSandbox: \(AppPaths.isSandboxed)\nHosts: \(hostAliases.count)\nRules: \(allRules.count)\nDesired: \(desired.count)\nActive: \(active.count)\nPending: \(pending.count)\nStorage error: \(storageIssue)\nAccess error: \(accessIssue)\n"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development"
+        let state: String = if let host = activeHost {
+            switch hostState[host] ?? .off {
+            case .off: "off"
+            case .connecting: "connecting"
+            case .on: "connected"
+            case .failed: "failed"
+            }
+        } else { "off" }
+        let configurationError: String = switch configIssue {
+        case .access: "access_denied"
+        case .missing: "file_missing"
+        case .invalid: "unreadable_or_invalid"
+        case nil: "none"
+        }
+        let counts = Dictionary(grouping: errors.values, by: \.diagnosticCode)
+            .map { "\($0.key)=\($0.value.count)" }.sorted().joined(separator: ", ")
+        let status: String
+        if storageIssue || configIssue != nil || accessIssue || hostError != nil || !errors.isEmpty || state == "failed" { status = "attention_required" }
+        else if activeHost != nil && state == "connected" { status = "connected_service_unverified" }
+        else if state == "connecting" || !pending.isEmpty { status = "working" }
+        else if !config.trustedConfig { status = "configuration_trust_required" }
+        else { status = "idle" }
+        var lines = ["pmap \(version) (build \(build))", "Diagnostics format: 2",
+                     "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)", "Sandbox: \(AppPaths.isSandboxed)",
+                     "Status: \(status)", "Host state: \(state)", "Host error: \(hostError?.diagnosticCode ?? "none")",
+                     "Configuration error: \(configurationError)", "Configuration trusted: \(config.trustedConfig)",
+                     "Hosts: \(hostAliases.count)", "Rules: \(allRules.count)", "Desired: \(desired.count)",
+                     "Active: \(active.count)", "Pending: \(pending.count)", "Port errors: \(errors.count)",
+                     "Port error categories: \(counts.isEmpty ? "none" : counts)",
+                     "Storage error: \(storageIssue)", "Access error: \(accessIssue)",
+                     "Restore on launch: \(config.restoreOnLaunch)", "Auto reconnect: \(config.autoReconnect)",
+                     "Notifications enabled: \(config.notifications)"]
+        func text(_ zh: String, _ en: String) -> String { lang == .zh ? zh : en }
+        var actions: [String] = []
+        if storageIssue {
+            actions.append(text("应用配置读写失败：先备份 pmap 配置，检查文件格式、磁盘空间和目录权限；不要直接删除旧配置。当前修改可能未保存。", "Application configuration could not be read or saved. Back it up, check format, disk space, and directory permissions. Do not delete the old configuration; recent changes may not be saved."))
+        }
+        if let issue = configIssue {
+            actions.append(issue.needsAccess
+                ? text("SSH 配置需要授权：点击配置错误旁的授权入口，选择实际文件或链接目标。", "Authorize the actual SSH configuration file or symlink target using Allow Access beside the configuration error.")
+                : text("SSH 配置缺失或不可读：用选项菜单的选择配置…选择存在且可读的 SSH 文本配置。", "Use Options → Choose Configuration to select an existing, readable SSH text configuration."))
+        } else if accessIssue {
+            actions.append(text("存在文件授权问题：重新选择 SSH 配置并检查所引用资源的访问授权。", "Reauthorize the SSH configuration and check access to referenced resources."))
+        }
+        if !config.trustedConfig {
+            actions.append(text("仅在确认配置来源可信后，选择主机并确认信任；信任本身不授予文件权限。", "Only after checking the configuration is trustworthy, select a host and confirm trust. Trust does not grant file access."))
+        }
+        if let hostError { actions.append(hostError.recoverySteps(lang)) }
+        var seen: Set<String> = []
+        if let hostError { seen.insert(hostError.diagnosticCode) }
+        for error in errors.values.sorted(by: { $0.diagnosticCode < $1.diagnosticCode }) where seen.insert(error.diagnosticCode).inserted {
+            actions.append(error.recoverySteps(lang))
+        }
+        if state == "failed" && hostError == nil {
+            actions.append(text("主机故障但缺少错误类别：重新选择主机重试，并检查界面或终端验证的具体错误。", "Host failed without an error category. Reselect it and inspect the UI or Terminal error."))
+        }
+        if actions.isEmpty {
+            actions.append(text("当前未记录故障。若主机未连接，请选择主机；若转发已建立，请用浏览器或客户端确认远端服务。", "No fault is currently recorded. Select a host if disconnected; if forwarding is established, verify the remote service with a browser or client."))
+        }
+        lines += ["", text("恢复步骤：", "Recovery steps:")]
+        lines += actions.enumerated().map { "\($0.offset + 1). \($0.element)" }
+        lines += ["", text("恢复验证：主机显示连通，所需端口为绿，最后用客户端确认服务响应；绿灯不保证远端服务健康。", "Verify recovery: host connected, desired ports green, then confirm service response with a client. Green does not guarantee remote service health."),
+                  text("说明：Access error 仅反映已记录的文件授权/配置读取问题；false 不保证 SSH 能读取全部资源。通知开关不等于系统已允许通知。本报告不执行任何修复。", "Access error reflects recorded file/configuration access issues; false does not guarantee SSH can read every resource. The notification preference does not confirm OS permission. This report performs no repairs.")]
+        return lines.joined(separator: "\n") + "\n"
     }
     func revokeAccess() {
         disconnect()
@@ -211,6 +322,7 @@ final class Store: ObservableObject {
             guard let self else { return }
             var delay = self.retryDelay
             var firstAttempt = true
+            var recovering = false
             while self.valid(id, host) {
                 guard firstAttempt || self.config.autoReconnect else { break }
                 firstAttempt = false
@@ -221,6 +333,7 @@ final class Store: ObservableObject {
                 let failure = await backend.connect()
                 guard self.valid(id, host) else { await backend.shutdown(); return }
                 if let failure {
+                    recovering = true
                     self.hostError = failure
                     self.hostState[host] = .failed
                     await backend.shutdown()
@@ -232,9 +345,11 @@ final class Store: ObservableObject {
                 }
                 self.hostError = nil
                 self.hostState[host] = .on
+                if recovering { self.notify(.reconnected(host: host, ports: self.desired.count)) }
+                recovering = false
                 for rule in self.allRules where self.desired.contains(rule.local) { self.scheduleOpen(rule) }
                 while self.valid(id, host) {
-                    do { try await Task.sleep(for: .seconds(30)) } catch { break }
+                    do { try await Task.sleep(for: self.heartbeatDelay) } catch { break }
                     let alive = await backend.check()
                     guard self.valid(id, host) else { break }
                     if !alive { break }
@@ -246,9 +361,8 @@ final class Store: ObservableObject {
                 self.hostState[host] = .failed
                 await backend.shutdown()
                 self.sessions[id] = nil
-                if self.config.notifications {
-                    Notifier.post(title: self.t(.notifyDisconnected), body: self.t(.connectionLost))
-                }
+                recovering = true
+                self.notify(.disconnected)
                 guard self.config.autoReconnect else { break }
                 do { try await Task.sleep(for: self.retryDelay) } catch { break }
             }
@@ -330,7 +444,8 @@ final class Store: ObservableObject {
                     self.pending.remove(rule.local)
                 }
             }
-            var delay: Duration = .seconds(5)
+            var delay = self.portRetryDelay
+            var recovering = false
             var firstAttempt = true
             while self.valid(id, host), self.desired.contains(rule.local), self.allRules.contains(rule) {
                 guard firstAttempt || self.config.autoReconnect else { return }
@@ -346,7 +461,12 @@ final class Store: ObservableObject {
                     return
                 }
                 self.errors[rule.local] = failure
-                if failure == nil { self.active.insert(rule.local); return }
+                if failure == nil {
+                    self.active.insert(rule.local)
+                    if recovering { self.notify(.portsRestored(1)) }
+                    return
+                }
+                recovering = true
                 guard self.config.autoReconnect, let failure, Self.retryable(failure) else { return }
                 do { try await Task.sleep(for: delay) } catch { return }
                 delay = min(delay * 2, .seconds(30))

@@ -121,6 +121,26 @@ enum Shell {
         return result.code == 0 ? result.output : nil
     }
 
+    static func localPortInUse(_ port: Int) -> Bool {
+        guard isValidPort(port) else { return false }
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return false }
+        defer { Darwin.close(descriptor) }
+        var reuse: Int32 = 1
+        _ = setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout.size(ofValue: reuse)))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = UInt16(port).bigEndian
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return result != 0 && errno == EADDRINUSE
+    }
+
     static func portBusy(_ port: Int) async -> String? {
         let result = await execute("/usr/sbin/lsof", ["-nP", "-a", "-iTCP:\(port)", "-sTCP:LISTEN", "-F", "c"])
         guard result.code == 0 else { return nil }
