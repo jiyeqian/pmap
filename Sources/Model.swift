@@ -8,8 +8,16 @@ import SwiftUI
 
 /// 端口灯三态（面板端口灯与菜单灯轮播共用的单一规则来源）
 /// 绿=转发中；红=转发失败（重试中）/ 本地端口被占用；灰=未开启 / 主机未连通
-enum PortLight {
+enum PortLight: Equatable, Sendable {
     case green, red, gray
+
+    var displayDuration: TimeInterval {
+        switch self {
+        case .red: 2
+        case .green: 1.5
+        case .gray: 0.5
+        }
+    }
 
     var color: Color {
         switch self {
@@ -25,6 +33,24 @@ enum PortLight {
         case .red: .systemRed
         case .gray: .systemGray
         }
+    }
+}
+
+struct PortCarousel {
+    private var lights: [PortLight] = []
+    private var index = 0
+    var current: PortLight? { lights.isEmpty ? nil : lights[index] }
+
+    mutating func update(_ values: [PortLight]) -> Bool {
+        guard values != lights else { return false }
+        lights = values
+        index = 0
+        return true
+    }
+
+    mutating func advance() {
+        guard !lights.isEmpty else { return }
+        index = (index + 1) % lights.count
     }
 }
 

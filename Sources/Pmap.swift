@@ -382,8 +382,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appearanceObserver: NSKeyValueObservation?
     private var eventMonitors: [Any] = []
     private var carouselTimer: Timer?        // 状态栏圆点轮播计时器
-    private var carouselIndex: Int = 0
-    private var carouselColors: [NSColor] = []
+    private var carousel = PortCarousel()
+    private var carouselTick = UUID()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let store = Store.shared else { return }
@@ -494,34 +494,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 轮播序列：全部端口（按 allRules 顺序）→ 端口灯规则色（与面板 Chip 同一函数）
         // 主机未连通时全部端口灯为灰 → 轮播序列全灰（纯端口中心，主机故障也灰）
-        let newColors: [NSColor] = store.allRules.map { store.portLight($0).nsColor }
-
-        // 序列变化则重置轮播索引（数量或内容不同）
-        if newColors.count != carouselColors.count
-            || zip(newColors, carouselColors).contains(where: { $0 != $1 }) {
-            carouselIndex = 0
+        let changed = carousel.update(store.allRules.map { store.portLight($0) })
+        if changed {
+            carouselTimer?.invalidate()
+            carouselTimer = nil
+            carouselTick = UUID()
         }
-        carouselColors = newColors
-
-        // 空序列（无任何端口）→ 灰点，停表
-        if newColors.isEmpty {
+        guard let light = carousel.current else {
             carouselTimer?.invalidate()
             carouselTimer = nil
             applyStatusIcon(ringColor: ringColor, dotColor: PmapColors.idleGray)
             return
         }
+        applyStatusIcon(ringColor: ringColor, dotColor: light.nsColor)
+        if carouselTimer == nil { scheduleCarousel() }
+    }
 
-        // 非空：立即显示当前时隙，并启动/复用 1.5s 轮播计时器
-        applyStatusIcon(ringColor: ringColor, dotColor: newColors[carouselIndex])
-        if carouselTimer == nil {
-            carouselTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    guard !self.carouselColors.isEmpty else { return }
-                    self.carouselIndex = (self.carouselIndex + 1) % self.carouselColors.count
-                    self.applyStatusIcon(ringColor: self.currentRingColor(),
-                                         dotColor: self.carouselColors[self.carouselIndex])
-                }
+    private func scheduleCarousel() {
+        guard let light = carousel.current else { return }
+        let tick = UUID()
+        carouselTick = tick
+        carouselTimer = Timer.scheduledTimer(withTimeInterval: light.displayDuration, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.carouselTick == tick else { return }
+                self.carouselTimer = nil
+                self.carousel.advance()
+                guard let light = self.carousel.current else { return }
+                self.applyStatusIcon(ringColor: self.currentRingColor(), dotColor: light.nsColor)
+                self.scheduleCarousel()
             }
         }
     }
