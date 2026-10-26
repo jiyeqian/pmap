@@ -1,8 +1,18 @@
 <div align="center">
   <img src="./docs/logo.svg" alt="pmap logo" width="180">
-  <h1>pmap</h1>
-  <p>macOS 菜单栏 SSH 本地端口转发管理器</p>
-  <p><a href="https://github.com/jiyeqian/pmap/releases">下载</a> · <a href="https://github.com/jiyeqian/pmap/issues">反馈</a> · <a href="./LICENSE">MIT License</a></p>
+  <h1>pmap：macOS 菜单栏 SSH 端口转发管理器</h1>
+  <p>
+    <a href="https://github.com/jiyeqian/pmap/actions/workflows/check.yml"><img src="https://github.com/jiyeqian/pmap/actions/workflows/check.yml/badge.svg?branch=main" alt="Checks"></a>
+    <a href="https://github.com/jiyeqian/pmap/actions/workflows/release.yml"><img src="https://github.com/jiyeqian/pmap/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+    <a href="https://github.com/jiyeqian/pmap/releases/latest"><img src="https://img.shields.io/github/v/release/jiyeqian/pmap" alt="Latest release"></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/github/license/jiyeqian/pmap" alt="MIT License"></a>
+  </p>
+  <p>
+    <a href="https://github.com/jiyeqian/pmap/releases"><img src="https://img.shields.io/github/downloads/jiyeqian/pmap/total" alt="Downloads"></a>
+    <a href="https://github.com/jiyeqian/pmap/releases/latest"><img src="https://img.shields.io/badge/macOS-14%2B-blue" alt="macOS 14 or later"></a>
+    <a href="https://github.com/jiyeqian/pmap/releases/latest"><img src="https://img.shields.io/badge/Universal-Intel%20%2B%20Apple%20Silicon-blue" alt="Intel and Apple Silicon"></a>
+  </p>
+  <p><a href="https://github.com/jiyeqian/pmap/releases/latest">下载</a> · <a href="https://github.com/jiyeqian/pmap/issues">反馈</a></p>
 </div>
 
 pmap 在 macOS 菜单栏管理 SSH 本地端口转发，使用你现有的 SSH 配置和密钥。支持 macOS 14 及以上、Intel 与 Apple Silicon。
