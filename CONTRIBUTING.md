@@ -110,3 +110,7 @@ Xcode 构建与商店归档见[商店准备](./docs/APP_STORE.md)，当前候选
 ## 外观回归
 
 修改背景、文字或菜单栏绘制后，按[主题验收矩阵](./docs/THEME_ACCEPTANCE.md)复测浅色启动、深色启动、打开/关闭面板时的双向切换与输入状态。必须检查真实状态栏面板，不以固定主题的调试窗口代替；同时检查切换后响应及 CPU，避免外观监听反复触发重绘。
+
+## 品牌图标维护
+
+品牌几何和固定 sRGB 配色只维护在 `Sources/IconDrawing.swift`，运行 `./make_icon.sh --update-logo` 同时生成 AppIcon 与 `docs/logo.svg`，不要手改生成的 SVG。普通构建仅生成应用资源，不改写 README Logo。品牌色与运行状态系统色独立；`Tests/IconDrawingTests.swift` 检查固定色、资产同步和状态图标绘制。

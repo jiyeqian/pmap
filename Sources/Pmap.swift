@@ -114,7 +114,9 @@ struct Chip: View {
             Button(action: remove) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(hovering ? .secondary : .tertiary)
+                    .foregroundStyle(hovering ? .primary : .secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(L10n.text(.deletePort, lang))
@@ -122,7 +124,7 @@ struct Chip: View {
             .disabled(pending && !desired)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .background(RoundedRectangle(cornerRadius: 5)
             .fill(duplicate ? Color.accentColor.opacity(0.18) : (hovering ? Color.primary.opacity(0.09) : Color.clear)))
         .onHover { hovering = $0 }

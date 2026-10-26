@@ -1,6 +1,6 @@
 #!/bin/bash
 # 生成 pmap.app 的应用图标（AppIcon.icns）
-# 用法：./make_icon.sh  （需要 macOS，使用内置 Swift + CoreGraphics 绘制）
+# 用法：./make_icon.sh [--update-logo]  （需要 macOS，使用内置 Swift + CoreGraphics 绘制）
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -20,18 +20,24 @@ import AppKit
 struct DrawIcon {
     static func main() {
         let image = pmapAppIcon(size: 1024)
-        guard let tiff = image.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
+        guard let rep = image.representations.first as? NSBitmapImageRep,
               let png = rep.representation(using: .png, properties: [:]) else {
             print("渲染失败"); exit(1)
         }
         try! png.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
+        if CommandLine.arguments.count > 2 {
+            try! pmapBrandSVG().write(toFile: CommandLine.arguments[2], atomically: true, encoding: .utf8)
+        }
     }
 }
 EOF
 
 xcrun swiftc -parse-as-library -O "$SCRIPT_DIR/Sources/IconDrawing.swift" "$OUT_DIR/draw.swift" -o "$OUT_DIR/draw"
-"$OUT_DIR/draw" "$OUT_DIR/icon_1024.png"
+if [[ "${1:-}" == --update-logo ]]; then
+    "$OUT_DIR/draw" "$OUT_DIR/icon_1024.png" "$SCRIPT_DIR/docs/logo.svg"
+else
+    "$OUT_DIR/draw" "$OUT_DIR/icon_1024.png"
+fi
 
 # 生成 iconset 各尺寸
 cd "$OUT_DIR"
