@@ -73,13 +73,30 @@ Git 标签保留 `v` 前缀，例如 `v0.1.5`；CI 会移除前缀后写入营�
 
 ## 构建与测试
 
+需要完整 Xcode 工具链。普通版与沙盒版均生成 Intel / Apple Silicon 通用二进制；本地默认临时签名，未公证。
+
 ```bash
-./build.sh    # 编译并打包 pmap.app
-./test.sh     # 运行单元测试
-./make_icon.sh # 重新生成 .build/icon/AppIcon.icns
+./test.sh
+./build.sh
+./scripts/verify-bundle.sh pmap.app
+
+PMAP_SANDBOX=1 ./build.sh
+PMAP_REQUIRE_SANDBOX=1 ./scripts/verify-bundle.sh pmap-sandbox.app
+
+PMAP_SANDBOX=0 ./scripts/integration-test.sh
+PMAP_SANDBOX=1 ./scripts/integration-test.sh
 ```
 
-> `build.sh` 先完成暂存包和签名校验，再替换输出；检测到输出路径正在运行时拒绝替换。仍应先正常退出旧实例，避免运行中 bundle 被外部修改。
+集成测试使用临时密钥与回环 SSH/HTTP 服务，不修改 `~/.ssh`。构建脚本先完成暂存包及签名校验，再替换输出；图标或签名失败会阻断构建，输出包运行中时拒绝替换。
+
+Xcode 构建与商店归档见[商店准备](./docs/APP_STORE.md)，当前候选版与验证边界见[验收记录](./docs/ACCEPTANCE.md)，历史行为变化见[版本差异](./docs/VERSION_COMPARISON.md)。
+
+## 界面与运行策略
+
+- 主面板中英文统一 220 pt；低频操作收在省略号菜单。
+- 菜单栏端口灯按端口顺序轮播：红 2 秒、绿 1.5 秒、灰 0.5 秒，状态变化重置计时。
+- 可恢复的初次连接失败按 3、6、12、24、30 秒退避；端口失败按 5、10、20、30 秒退避。认证、指纹及禁止转发等错误不自动重试。
+- 启动恢复与自动重连固定开启。配置原子保存，`active` 表示期望恢复的端口，不等同于实时连通状态。
 
 ## 界面文案与国际化
 
