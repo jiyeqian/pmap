@@ -153,7 +153,7 @@ func pmapBrandSVG(size: CGFloat = 512) -> String {
     let stemWidth = g.stemW * size
     return """
     <svg width="\(n(size))" height="\(n(size))" viewBox="0 0 \(n(size)) \(n(size))" xmlns="http://www.w3.org/2000/svg">
-      <!-- Generated from Sources/IconDrawing.swift; run ./make_icon.sh --update-logo -->
+      <!-- Generated from Sources/IconDrawing.swift. Do not edit. -->
       <rect width="\(n(size))" height="\(n(size))" rx="\(n(size * g.cornerRadius))" fill="\(hex(PmapBrand.background))"/>
       <g fill="\(hex(PmapBrand.foreground))">
         <rect x="\(n(g.leftStemX * size - stemWidth / 2))" y="\(n((1 - g.leftStemYTop) * size))" width="\(n(stemWidth))" height="\(n((g.leftStemYTop - g.leftStemYBottom) * size))" rx="\(n(stemWidth / 2))"/>

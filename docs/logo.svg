@@ -1,5 +1,5 @@
 <svg width="512.0000" height="512.0000" viewBox="0 0 512.0000 512.0000" xmlns="http://www.w3.org/2000/svg">
-  <!-- Generated from Sources/IconDrawing.swift; run ./make_icon.sh --update-logo -->
+  <!-- Generated from Sources/IconDrawing.swift. Do not edit. -->
   <rect width="512.0000" height="512.0000" rx="114.5344" fill="#2B2B2E"/>
   <g fill="#FFFFFF">
     <rect x="96.0768" y="227.4304" width="88.0128" height="220.0064" rx="44.0064"/>

@@ -30,6 +30,7 @@ struct IconDrawingTests {
     func generatedSVG() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let committed = try String(contentsOf: root.appendingPathComponent("docs/logo.svg"), encoding: .utf8)
+        #expect(XMLParser(data: Data(committed.utf8)).parse())
         #expect(committed == pmapBrandSVG())
         #expect(committed.contains("#2B2B2E"))
         #expect(committed.contains("#FFFFFF"))
