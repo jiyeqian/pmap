@@ -18,6 +18,9 @@ jobs:
       - name: Test
         run: ./test.sh
 
+      - name: Hidden panel appearance regression
+        run: ./scripts/appearance-test.sh
+
       - name: Build universal binary
         shell: bash
         run: |

@@ -106,3 +106,7 @@ Xcode 构建与商店归档见[商店准备](./docs/APP_STORE.md)，当前候选
 - 错误信息一律以结构化枚举（`Sources/PortError.swift` 的 `PortError`）保存，**不要把渲染好的字符串存进状态**：这样切换语言时已有错误才会即时变成新语言。`PortError.classify` 负责把 OpenSSH 英文原文归类，描述在渲染时翻译。
 - 调试与自检输出（`--snapshot` / `--render` / `--list-hosts`、调试窗口标题）保持中文原文，不纳入双语范围。
 - 开发期可用 `--lang zh|en` 配合 `--snapshot` / `--render` 渲染指定语言做目检。
+
+## 外观回归
+
+修改背景、文字或菜单栏绘制后，按[主题验收矩阵](./docs/THEME_ACCEPTANCE.md)复测浅色启动、深色启动、打开/关闭面板时的双向切换与输入状态。必须检查真实状态栏面板，不以固定主题的调试窗口代替；同时检查切换后响应及 CPU，避免外观监听反复触发重绘。

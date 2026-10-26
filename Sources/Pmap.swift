@@ -148,6 +148,7 @@ struct MenuPanel: View {
             else { workingPanel }
         }
         .frame(width: 220)
+        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { store.refreshOnOpen() }
     }
 
@@ -416,7 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in self?.resizePanelToFit() }
             }
 
-        // 语言切换：面板宽度按语言自适应（zh 180 / en 200），切换后即时调整
+        // 语言切换后按当前内容重新测量面板
         langObserver = store.$lang
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -449,7 +450,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         content.wantsLayer = true
         content.layer?.cornerRadius = 12
         content.layer?.masksToBounds = true
-        content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         p.contentView = content
         panel = p
         if !CommandLine.arguments.contains("--panel") {
@@ -489,8 +489,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let store = Store.shared else { return }
 
         // 前景色（圆环/竖笔）：深色菜单栏用白、浅色用黑
-        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let ringColor: NSColor = isDark ? .white : .black
+        let ringColor = currentRingColor()
 
         // 轮播序列：全部端口（按 allRules 顺序）→ 端口灯规则色（与面板 Chip 同一函数）
         // 主机未连通时全部端口灯为灰 → 轮播序列全灰（纯端口中心，主机故障也灰）
@@ -536,8 +535,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 当前深浅色对应的前景色
     private func currentRingColor() -> NSColor {
-        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return isDark ? .white : .black
+        let appearance = statusItem?.button?.effectiveAppearance ?? NSApp.effectiveAppearance
+        return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white : .black
     }
 
     @objc private func togglePanel(_ sender: Any?) {
@@ -552,7 +551,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPanel() {
         guard let panel, let btn = statusItem?.button, let iconWin = btn.window else { return }
         Store.shared?.refreshOnOpen()
-        // 尺寸随内容自适应（宽度由语言决定：zh 180 / en 200）
+        // 宽度固定为 220 pt，高度随内容自适应
         let fit = panel.contentView?.fittingSize ?? NSSize(width: 180, height: 200)
         var frame = panel.frame
         frame.size = NSSize(width: fit.width > 0 ? fit.width : 180, height: max(fit.height, 100))
@@ -686,7 +685,6 @@ struct PmapApp: App {
                                    styleMask: [.titled],
                                    backing: .buffered, defer: false)
                 win.title = "pmap render"
-                win.appearance = NSAppearance(named: .darkAqua)
                 let host = NSHostingView(rootView: MenuPanel(store: Store.shared!))
                 win.contentView = host
                 win.center()
@@ -715,7 +713,6 @@ struct PmapApp: App {
                                    styleMask: [.titled],
                                    backing: .buffered, defer: false)
                 win.title = "pmap 调试"
-                win.appearance = NSAppearance(named: .darkAqua)
                 win.contentView = NSHostingView(rootView: MenuPanel(store: Store.shared!))
                 win.center()
                 win.makeKeyAndOrderFront(nil)

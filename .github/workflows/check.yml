@@ -12,6 +12,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Unit and lifecycle tests
         run: ./test.sh
+      - name: Hidden panel appearance regression
+        run: ./scripts/appearance-test.sh
       - name: Build universal application
         run: ./build.sh
       - name: Validate bundle
