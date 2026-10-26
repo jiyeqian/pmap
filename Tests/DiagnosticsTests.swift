@@ -25,6 +25,21 @@ struct DiagnosticsTests {
         #expect(s.redactedDiagnostics.components(separatedBy: "\n\n").count == 2)
     }
 
+    @Test("中英文端口占用报告不包含恢复建议")
+    func noRecoveryInstructions() {
+        let s = store()
+        s.errors = [3080: .localPortBusy(port: 3080, by: "private-process")]
+        for lang in [Lang.zh, .en] {
+            s.setLang(lang, persist: false)
+            let report = s.redactedDiagnostics
+            #expect(report.contains("local_port_busy=1"))
+            #expect(!report.contains("恢复步骤"))
+            #expect(!report.contains("Recovery steps"))
+            #expect(!report.contains("Stop the local program"))
+            #expect(!report.contains("在本机关闭"))
+        }
+    }
+
     @Test("主机失败不会被正常的文件和存储状态掩盖")
     func hostKeyFailure() {
         let s = store()
@@ -39,9 +54,7 @@ struct DiagnosticsTests {
         #expect(report.contains("Host error: host_key_rejected"))
         #expect(report.contains("Storage error: false"))
         #expect(report.contains("Access error: false"))
-        #expect(report.contains("known_hosts"))
-        #expect(report.contains("不要删除整个"))
-        #expect(report.contains("终端验证"))
+        #expect(!report.contains("恢复步骤"))
         #expect(!report.contains("PRIVATE-HOST"))
     }
 
@@ -65,7 +78,7 @@ struct DiagnosticsTests {
             #expect(report.contains("Host error: " + failure.diagnosticCode))
             #expect(report.contains(failure.diagnosticCode + "=2"))
             #expect(report.contains("Port errors: 2"))
-            #expect(report.contains("Recovery steps:"))
+            #expect(!report.contains("Recovery steps:"))
             #expect(!failure.recoverySteps(.zh).isEmpty)
             #expect(!failure.recoverySteps(.en).isEmpty)
             for secret in ["SECRET-", "54321", "54322", "192.0.2.123", "token=private"] {
@@ -74,7 +87,7 @@ struct DiagnosticsTests {
         }
     }
 
-    @Test("配置缺失和损坏存储有独立恢复说明且不泄露文件名")
+    @Test("配置缺失和损坏存储仅报告错误状态且不泄露文件名")
     func configurationFailures() {
         let s = store()
         s.setLang(.en, persist: false)
@@ -83,8 +96,8 @@ struct DiagnosticsTests {
         let report = s.redactedDiagnostics
         #expect(report.contains("Configuration error: file_missing"))
         #expect(report.contains("Storage error: true"))
-        #expect(report.contains("Back it up"))
-        #expect(report.contains("Check the config file"))
+        #expect(!report.contains("Back it up"))
+        #expect(!report.contains("Check the config file"))
         #expect(!report.contains("PRIVATE-MISSING"))
     }
 
@@ -106,6 +119,6 @@ struct DiagnosticsTests {
         #expect(!s.redactedDiagnostics.contains("This report performs no repairs"))
         s.hostState["private"] = .failed
         #expect(s.redactedDiagnostics.contains("Status: attention_required"))
-        #expect(s.redactedDiagnostics.contains("Host failed without an error category"))
+        #expect(s.redactedDiagnostics.contains("Host state: failed"))
     }
 }

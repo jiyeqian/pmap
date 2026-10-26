@@ -8,7 +8,7 @@ pmap 是系统 OpenSSH 的本地端口转发控制面板。它连接你指定的
 
 主机别名、端口、备注、语言、连接状态与文件访问书签仅保存在本机应用支持目录中。私钥不复制到 pmap 配置；系统 OpenSSH 使用你授权的原文件。现有 SSH 配置中的 ProxyCommand、Match exec、KnownHostsCommand 等指令可能执行程序或连接第三方服务，其行为由你信任的配置决定。pmap 禁用 LocalCommand、Agent/X11 转发和配置内额外端口映射。
 
-pmap 不自动信任新主机或接受主机密钥变化。首次连接与密钥解锁需要你在终端确认。应用内诊断复制只包含版本、系统版本、计数、固定错误类别、状态和恢复建议，不包含主机名、地址、密钥、备注、文件路径或原始 SSH 输出。界面上的错误信息可能含 OpenSSH 返回的目标信息，请在分享截图前检查。
+pmap 不自动信任新主机或接受主机密钥变化。首次连接与密钥解锁需要你在终端确认。应用内诊断复制只包含版本、系统版本、计数、固定错误类别、状态，不包含主机名、地址、密钥、备注、文件路径或原始 SSH 输出。界面上的错误信息可能含 OpenSSH 返回的目标信息，请在分享截图前检查。
 
 通知由 macOS 在本机发送，是否显示由系统通知授权与设置控制，不包含主机名或地址。打开项目主页会调用系统浏览器，后续访问适用该网站的隐私政策。
 
@@ -22,7 +22,7 @@ pmap is a local graphical controller for system OpenSSH port forwarding. It conn
 
 Host aliases, ports, notes, language, connection state, and file-access bookmarks are stored locally in application support. Private keys are not copied into pmap configuration; system OpenSSH reads authorized original files. ProxyCommand, Match exec, and KnownHostsCommand in trusted SSH configuration may execute programs or contact third-party services. pmap disables LocalCommand, agent/X11 forwarding, and additional forwards declared in SSH configuration.
 
-pmap never automatically trusts new hosts or accepts changed host keys. Verify hosts and unlock keys in Terminal. Copied diagnostics contain only version, operating-system version, counts, fixed error categories, status flags, and recovery guidance, omitting host names, addresses, keys, notes, paths, and raw SSH output. Visible errors may include target information returned by OpenSSH; review screenshots before sharing them.
+pmap never automatically trusts new hosts or accepts changed host keys. Verify hosts and unlock keys in Terminal. Copied diagnostics contain only version, operating-system version, counts, fixed error categories, status flags, omitting host names, addresses, keys, notes, paths, and raw SSH output. Visible errors may include target information returned by OpenSSH; review screenshots before sharing them.
 
 macOS notifications are local, displayed according to system notification authorization and settings, and omit host names and addresses. Opening the project homepage launches your browser; the destination website's privacy policy applies.
 

@@ -308,7 +308,7 @@ final class Store: ObservableObject {
         else if !config.trustedConfig { status = "configuration_trust_required" }
         else { status = "idle" }
         let versions = "pmap Version \(version) (Build \(build))\nmacOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
-        var fields = ["Diagnostics format: 3", "Sandbox: \(AppPaths.isSandboxed)",
+        let fields = ["Diagnostics format: 3", "Sandbox: \(AppPaths.isSandboxed)",
                      "Status: \(status)", "Host state: \(state)", "Host error: \(hostError?.diagnosticCode ?? "none")",
                      "Configuration error: \(configurationError)", "SSH folder authorized: \(folderAuthorized)",
                      "Known hosts error: \(knownHostsIssue?.diagnosticCode ?? "none")", "Configuration trusted: \(config.trustedConfig)",
@@ -318,34 +318,6 @@ final class Store: ObservableObject {
                      "Storage error: \(storageIssue)", "Access error: \(accessIssue)",
                      "Restore on launch: \(config.restoreOnLaunch)", "Auto reconnect: \(config.autoReconnect)",
                      "Notifications enabled: \(config.notifications)"]
-        func text(_ zh: String, _ en: String) -> String { lang == .zh ? zh : en }
-        var actions: [String] = []
-        if storageIssue {
-            actions.append(text("应用配置读写失败：先备份 pmap 配置，检查文件格式、磁盘空间和目录权限；不要直接删除旧配置。当前修改可能未保存。", "Application configuration could not be read or saved. Back it up, check format, disk space, and directory permissions. Do not delete the old configuration; recent changes may not be saved."))
-        }
-        if let issue = configIssue {
-            actions.append(issue.needsAccess
-                ? text("SSH 配置需要授权：点击配置错误旁的授权入口，选择实际文件或链接目标。", "Authorize the actual SSH configuration file or symlink target using Allow Access beside the configuration error.")
-                : text("SSH 配置缺失或不可读：检查 .ssh 文件夹中的 config 文件；配置读取正常后重新打开主面板。", "Check the config file in the .ssh folder, then reopen the panel after correcting it."))
-        } else if accessIssue {
-            actions.append(text("存在文件授权问题：检查错误旁的补充授权入口。", "Use the supplemental access action beside the relevant error."))
-        }
-        if let message = knownHostsMessage { actions.append(message) }
-        if !config.trustedConfig {
-            actions.append(text("仅在确认配置来源可信后，选择主机并确认信任；信任本身不授予文件权限。", "Only after checking the configuration is trustworthy, select a host and confirm trust. Trust does not grant file access."))
-        }
-        if let hostError { actions.append(hostError.recoverySteps(lang)) }
-        var seen: Set<String> = []
-        if let hostError { seen.insert(hostError.diagnosticCode) }
-        for error in errors.values.sorted(by: { $0.diagnosticCode < $1.diagnosticCode }) where seen.insert(error.diagnosticCode).inserted {
-            actions.append(error.recoverySteps(lang))
-        }
-        if state == "failed" && hostError == nil {
-            actions.append(text("主机故障但缺少错误类别：重新选择主机重试，并检查界面或终端验证的具体错误。", "Host failed without an error category. Reselect it and inspect the UI or Terminal error."))
-        }
-        if !actions.isEmpty {
-            fields.append(text("恢复步骤：", "Recovery steps:") + " " + actions.joined(separator: " "))
-        }
         return versions + "\n\n" + fields.joined(separator: "; ") + "\n"
     }
     func revokeAccess() {
