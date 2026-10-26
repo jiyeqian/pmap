@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 VERSION="${PMAP_VERSION:-0.2.0}"
 VERSION="${VERSION#v}"
-BUILD_NUMBER="${PMAP_BUILD_NUMBER:-5}"
+BUILD_NUMBER="${PMAP_BUILD_NUMBER:-6}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid version: $VERSION" >&2; exit 1; }
 [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || { echo 'Invalid build number' >&2; exit 1; }
 SANDBOX="${PMAP_SANDBOX:-0}"

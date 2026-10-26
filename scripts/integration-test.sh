@@ -65,6 +65,6 @@ for port in (39227,39228):
         except OSError: time.sleep(.1)
     else: raise SystemExit(f'Fixture did not listen on {port}')
 PY
-PMAP_SANDBOX=1 PMAP_TEST_FIXTURE="$FIXTURE" PMAP_OUTPUT_APP=pmap-probe.app ./build.sh
+PMAP_SANDBOX="${PMAP_SANDBOX:-1}" PMAP_TEST_FIXTURE="$FIXTURE" PMAP_OUTPUT_APP=pmap-probe.app ./build.sh
 BUILT_PROBE=1
 ./pmap-probe.app/Contents/MacOS/pmap --integration

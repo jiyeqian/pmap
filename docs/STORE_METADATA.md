@@ -20,7 +20,7 @@ Name: pmap
 
 Subtitle: SSH Local Port Forwarding
 
-Description: Manage SSH local port forwards from the macOS menu bar. Choose an existing SSH host, add local and remote ports, and start or stop forwarding. pmap uses system OpenSSH with configuration and keys you authorize. Features include port notes, optional reconnect and launch restore, local notifications, and Chinese/English interfaces.
+Description: Manage SSH local port forwards from the macOS menu bar. Choose an existing SSH host, add local and remote ports, and start or stop forwarding. pmap uses system OpenSSH with configuration and keys you authorize. Features include port notes, automatic reconnect and launch restore, local notifications, and Chinese/English interfaces.
 
 Verify host fingerprints and authentication in Terminal before connecting. pmap uses noninteractive authentication and never automatically trusts new hosts. Sandbox permissions may limit SSH Agent access, external commands, and referenced files. An established forward does not guarantee remote service health.
 
@@ -28,9 +28,9 @@ Verify host fingerprints and authentication in Terminal before connecting. pmap 
 
 应用是 LSUIElement 菜单栏工具，无常驻 Dock 图标。启动后从菜单栏 pmap 图标打开面板，从主面板授权默认 .ssh 文件夹。需要审核专用 SSH 服务器与可用测试密钥，服务端应允许本地 TCP 转发，并提供可访问的 HTTP 测试服务。
 
-送审时提供完整的主机地址、端口、审核用户名、认证材料传递方式、可信主机指纹、本地/远端端口及预期 HTTP 响应。不得使用开发者日常服务器或生产密钥。授权 .ssh 文件夹，config 或 known_hosts 外部链接目标被拒绝时接续补充授权；首次选择主机连接时确认配置信任；应用不请求 root 权限，不安装后台服务，不在登录时自动启动。
+送审时提供完整的主机地址、端口、审核用户名、认证材料传递方式、可信主机指纹、本地/远端端口及预期 HTTP 响应。不得使用开发者日常服务器或生产密钥。授权 .ssh 文件夹，config 或 known_hosts 外部链接目标被拒绝时接续补充授权；仅在配置含本机命令时确认执行授权；应用不请求 root 权限，不安装后台服务，不在登录时自动启动。
 
-推荐审核流程：启动 → 授权含测试配置的 .ssh 文件夹 → 核验主机指纹与认证 → 选择测试主机并确认信任 → 添加测试端口 → 浏览器验证响应 → 停止转发 → 退出并确认端口释放。
+推荐审核流程：启动 → 授权含测试配置的 .ssh 文件夹 → 核验主机指纹与认证 → 选择测试主机（含命令配置时确认） → 添加测试端口 → 浏览器验证响应 → 停止转发 → 退出并确认端口释放。
 
 ## 提交前待确认字段
 
